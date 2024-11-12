@@ -1,6 +1,6 @@
 import torch
 
-def fermi_distribution(E, mu, temperature, particle_type):
+def fermi_distribution(E: torch.Tensor, mu: torch.Tensor, temperature: torch.Tensor, particle_type: str) -> torch.Tensor:
     """
     Calculate the Fermi-Dirac distribution for electrons ('e') and holes ('h').
     Assuming k_B = 1 for simplicity and using compatible units.

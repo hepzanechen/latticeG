@@ -1,7 +1,7 @@
 import torch
-from fermi_distribution import fermi_distribution
+from .fermi_distribution import fermi_distribution
 
-def lead_decimation(E, t, epsilon0, mu, temperature, particle_type, desired_accuracy=1e-25):
+def lead_decimation(E: torch.Tensor, t: torch.Tensor, epsilon0: torch.Tensor, mu: torch.Tensor, temperature: torch.Tensor, particle_type: str, desired_accuracy: float = 1e-25) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Calculate the lead's Green's functions using the decimation method.
 
@@ -27,16 +27,14 @@ def lead_decimation(E, t, epsilon0, mu, temperature, particle_type, desired_accu
     tuple
         (gLr, gLa, gLless, gLmore) - Retarded, advanced, lesser, and greater Green's functions.
     """
-    slice_dim = t.size(0)
 
     # Fermi distribution for calculating lesser and greater Green's functions
     f = fermi_distribution(E, mu, temperature, particle_type)
 
     # Add small imaginary part for regularization
-    if particle_type == 'h':
-        omega = (-E + 1e-2j) * torch.eye(slice_dim,dtype=torch.complex64, device=E.device)
-    else:  # Default to 'particle'
-        omega = (E + 1e-2j) * torch.eye(slice_dim,dtype=torch.complex64, device=E.device)
+    imaginary_regularization = 1e-2j
+    scalar = -E if particle_type == 'h' else E
+    omega = torch.diag(torch.full_like(t[:, 0], scalar + imaginary_regularization, dtype=torch.complex64, device=E.device))
 
     # Initialize variables
     H00 = epsilon0
@@ -69,33 +67,3 @@ def lead_decimation(E, t, epsilon0, mu, temperature, particle_type, desired_accu
 
     return gLr, gLa, gLless, gLmore
 
-
-from time import time
-# Define parameters
-t = torch.tensor([[20.0, 0.0], [0.0, 20.0]],dtype=torch.complex64,device='cuda' if torch.cuda.is_available() else 'cpu')
-epsilon0 = torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.complex64, device=t.device)
-E = torch.tensor(0.1,dtype=torch.float32, device=t.device)
-mu = torch.tensor(0.2,dtype=torch.float32,device=t.device)
-temperature = torch.tensor(1e-6,dtype=torch.float32,device=t.device)
-particle_type = 'e'
-
-# Time the function execution
-start_time = time()
-
-# Call lead_decimation to calculate Green's functions
-gLr, gLa, gLless, gLmore = lead_decimation(E, t, epsilon0, mu, temperature, particle_type)
-elapsed_time = time() - start_time
-# Display results
-print('Retarded Greens function:')
-print(gLr)
-
-print('Advanced Greens function:')
-print(gLa)
-
-print('Lesser Greens function:')
-print(gLless)
-
-print('Greater Greens function:')
-print(gLmore)
-
-print(f'Elapsed time: {elapsed_time:.4f} seconds')
