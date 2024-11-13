@@ -6,6 +6,6 @@ from .lead_hamiltonian import Lead
 # Define what is exported when `from hamiltonians import *` is used
 __all__ = [
     "CentralHamiltonian",
-    "Cen"
+    "CentralHamiltonianBdG",
     "Lead"
 ]

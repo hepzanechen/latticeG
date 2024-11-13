@@ -58,8 +58,18 @@ def lead_decimation(E: torch.Tensor, t: torch.Tensor, epsilon0: torch.Tensor, mu
     # Calculating the retarded Green's function
     gLr = torch.linalg.inv(omega - epsilon_s)
 
+    # for hole G22(\omega)=-G11(-\omega)^*
+    if particle_type == 'h':
+        gLr = -gLr.conj()
+
+        
     # The advanced Green's function is the Hermitian conjugate of gLr
     gLa = gLr.T.conj()
+
+
+    # This for kron operation latter
+    gLr = gLr.contiguous()
+    gLa = gLa.contiguous()
 
     # Lesser and greater Green's functions using the Keldysh formalism
     gLless = (gLa - gLr) * f
