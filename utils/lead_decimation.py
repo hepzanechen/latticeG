@@ -34,8 +34,7 @@ def lead_decimation(E: torch.Tensor, t: torch.Tensor, epsilon0: torch.Tensor, mu
     # Add small imaginary part for regularization
     imaginary_regularization = 1e-2j
     scalar = -E if particle_type == 'h' else E
-    omega = torch.diag(torch.full_like(t[:, 0], scalar + imaginary_regularization, dtype=torch.complex64, device=E.device))
-
+    omega = (scalar + imaginary_regularization) * torch.eye(t.size(0), dtype=torch.complex64, device=E.device)
     # Initialize variables
     H00 = epsilon0
     H01 = t
