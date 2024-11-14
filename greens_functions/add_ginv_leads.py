@@ -1,7 +1,7 @@
 import torch
 from utils.lead_decimation import lead_decimation
 
-def construct_ginv_leads(Ginv_central: torch.Tensor, leads_info: list, E: torch.Tensor) -> torch.Tensor:
+def add_ginv_leads(Ginv_central: torch.Tensor, leads_info: list, E: torch.Tensor) -> torch.Tensor:
     """
     Construct the block diagonal Green's function matrix for the leads and central region.
 

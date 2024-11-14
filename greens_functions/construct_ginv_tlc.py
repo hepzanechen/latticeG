@@ -1,6 +1,6 @@
 import torch
 
-def construct_ginv_tlc(lead, Ncentre: int, NLi: int) -> torch.Tensor:
+def construct_ginv_tlc(lead:Lead, Ncentre: int, NLi: int) -> torch.Tensor:
     """
     Construct the tunneling matrix (tLC_combined) for the lead and central region, including counting fields.
 

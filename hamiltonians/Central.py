@@ -1,6 +1,6 @@
 import torch
 
-class CentralHamiltonian:
+class Central:
     def __init__(self, Ny: int, Nx: int, t_y: torch.Tensor, t_x: torch.Tensor):
         """
         Initializes the base central Hamiltonian with roles of x and y switched.
@@ -43,18 +43,18 @@ class CentralHamiltonian:
         return H_full_diag + H_full_diag1 + H_full_diag1.T.conj()
 
     def __repr__(self):
-        return f"CentralHamiltonian(Ny={self.Ny}, Nx={self.Nx}, t_y={self.t_y}, t_x={self.t_x})"
+        return f"Central(Ny={self.Ny}, Nx={self.Nx}, t_y={self.t_y}, t_x={self.t_x})"
 
 
 
-class DisorderedCentralHamiltonian(CentralHamiltonian):
+class DisorderedCentral(Central):
     def __init__(self, Nx: int, Ny: int, t_x: torch.Tensor, t_y: torch.Tensor, deltaV: torch.Tensor, N_imp: int, xi: float):
         """
         Initializes a disordered central Hamiltonian.
 
         Parameters:
         -----------
-        Nx, Ny, t_x, t_y : same as CentralHamiltonian.
+        Nx, Ny, t_x, t_y : same as Central.
         deltaV : torch.Tensor
             Amplitude range for the disorder potential.
         N_imp : int
@@ -91,14 +91,14 @@ class DisorderedCentralHamiltonian(CentralHamiltonian):
 
         return torch.diag(U.flatten())
 
-class CentralHamiltonianBdG(CentralHamiltonian):
+class CentralBdG(Central):
     def __init__(self, Nx: int, Ny: int, t_x: torch.Tensor, t_y: torch.Tensor, Delta: torch.Tensor):
         """
         Initializes a BdG central Hamiltonian with superconducting pairing.
 
         Parameters:
         -----------
-        Nx, Ny, t_x, t_y : same as CentralHamiltonian.
+        Nx, Ny, t_x, t_y : same as Central.
         Delta : torch.Tensor
             Pairing potential for superconductivity.
         """
