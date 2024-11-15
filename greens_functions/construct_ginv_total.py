@@ -14,7 +14,7 @@ def construct_ginv_total(H_BdG: torch.Tensor, E: torch.Tensor, eta: torch.Tensor
         Hamiltonian of the central region in BdG formalism.
     E : torch.Tensor
         Energy value.
-    eta : float
+    eta : torch.Tensor
         Small imaginary part for regularization.
     leads_info : list
         List of Lead objects containing lead parameters.
@@ -26,13 +26,13 @@ def construct_ginv_total(H_BdG: torch.Tensor, E: torch.Tensor, eta: torch.Tensor
     """
     # Construct Ginv_central
     Ginv_central = construct_ginv_central(H_BdG, E, eta)
-    Ncentre = Ginv_central.size(0) / 4
+    Ncentre = int(Ginv_central.size(0) / 4)
 
     # Number of leads
     num_leads = len(leads_info)
 
     # Add leads diagonal part
-    Ginv_total_blkdiag = add_ginv_leads(Ginv_central, leads_info, E, num_leads)
+    Ginv_total_blkdiag = add_ginv_leads(Ginv_central, leads_info, E)
 
     # Initialize tLCBlk matrix with zeros
     tLC_blk = torch.zeros_like(Ginv_total_blkdiag)

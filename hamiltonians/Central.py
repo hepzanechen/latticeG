@@ -8,9 +8,9 @@ class Central:
         Parameters:
         -----------
         Ny : int
-            Number of lattice sites in the x-direction.
-        Nx : int
             Number of lattice sites in the y-direction.
+        Nx : int
+            Number of lattice sites in the x-direction.
         t_y : torch.Tensor
             Hopping parameter in the y-direction.
         t_x : torch.Tensor
@@ -24,7 +24,7 @@ class Central:
         # Construct the Hamiltonian matrices
         self.H_chain_y = self._construct_chain_y()
         #  TODO: make * to kron when expand t_x, now it seems only support scalr t_x
-        self.H_inter_x = self.t_x * torch.eye(Ny, dtype=torch.complex64)
+        self.H_along_x = self.t_x * torch.eye(Ny, dtype=torch.complex64)
 
         # Assemble the full Hamiltonian
         self.H_full = self._assemble_full_hamiltonian()
@@ -39,7 +39,7 @@ class Central:
     def _assemble_full_hamiltonian(self) -> torch.Tensor:
         """Assembles the full Hamiltonian matrix without disorder effects."""
         H_full_diag = torch.kron(torch.eye(self.Nx, dtype=torch.complex64), self.H_chain_y)
-        H_full_diag1 = torch.kron(torch.diag(torch.ones(self.Nx - 1, dtype=torch.complex64), 1), self.H_inter_x)
+        H_full_diag1 = torch.kron(torch.diag(torch.ones(self.Nx - 1, dtype=torch.complex64), 1), self.H_along_x)
         return H_full_diag + H_full_diag1 + H_full_diag1.T.conj()
 
     def __repr__(self):
@@ -91,28 +91,38 @@ class DisorderedCentral(Central):
 
         return torch.diag(U.flatten())
 
+
 class CentralBdG(Central):
-    def __init__(self, Nx: int, Ny: int, t_x: torch.Tensor, t_y: torch.Tensor, Delta: torch.Tensor):
+    def __init__(self, Ny: int, Nx: int, t_y: torch.Tensor, t_x: torch.Tensor, Delta: torch.Tensor):
         """
         Initializes a BdG central Hamiltonian with superconducting pairing.
 
         Parameters:
-        -----------
-        Nx, Ny, t_x, t_y : same as Central.
+        ----------- 
+        Ny : int
+            Number of lattice sites in the y-direction.
+        Nx : int
+            Number of lattice sites in the x-direction.
+        t_y : torch.Tensor
+            Hopping parameter in the y-direction.
+        t_x : torch.Tensor
+            Hopping parameter in the x-direction.
         Delta : torch.Tensor
             Pairing potential for superconductivity.
         """
-        super().__init__(Nx, Ny, t_x, t_y)
+        super().__init__(Ny, Nx, t_y, t_x)
         self.Delta = Delta
 
         # Construct BdG Hamiltonian
-        self.H_full_Bdg = self._construct_bdg_with_pairing()
+        self.H_full_BdG = self._construct_bdg_with_pairing()
 
     def _construct_bdg_with_pairing(self) -> torch.Tensor:
         """Constructs the BdG Hamiltonian with superconducting pairing."""
-        pairing_matrix = torch.eye(self.Nx * self.Ny, dtype=torch.complex64) * self.Delta
-        H_full_Bdg = torch.kron(self.H_full, torch.tensor([[1, 0], [0, 0]], dtype=torch.complex64)) + \
+        pairing_matrix = torch.eye(self.Ny * self.Nx, dtype=torch.complex64) * self.Delta
+        H_full_BdG = torch.kron(self.H_full, torch.tensor([[1, 0], [0, 0]], dtype=torch.complex64)) + \
                      torch.kron(-self.H_full.conj(), torch.tensor([[0, 0], [0, 1]], dtype=torch.complex64)) + \
                      torch.kron(pairing_matrix, torch.tensor([[0, 1], [1, 0]], dtype=torch.complex64))
-        return H_full_Bdg
+        return H_full_BdG
 
+    def __repr__(self):
+        return f"CentralBdG(Ny={self.Ny}, Nx={self.Nx}, t_y={self.t_y}, t_x={self.t_x}, Delta={self.Delta})"
