@@ -37,12 +37,12 @@ def calculation_cf_autograd(E: torch.Tensor, H_BdG: torch.Tensor, eta: torch.Ten
 
     # Compute the generating function
     gen_func = torch.logdet(Ginv_total)
-
+    gen_func_imag = gen_func.imag
     # Store the generating function value
     results['genFuncValue'] = gen_func.item()
 
     # First-order derivative
-    first_order_grad = torch.autograd.grad(gen_func, lambda_tensor, create_graph=True)[0]
+    first_order_grad = torch.autograd.grad(gen_func_imag, lambda_tensor, create_graph=True)[0]
     results['gradientsZero'] = {1: first_order_grad}
 
     # Second-order derivative (Hessian)
