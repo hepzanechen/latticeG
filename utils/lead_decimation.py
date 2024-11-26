@@ -28,6 +28,7 @@ def lead_decimation(E: torch.Tensor, t: torch.Tensor, epsilon0: torch.Tensor, mu
         (gLr, gLa, gLless, gLmore) - Retarded, advanced, lesser, and greater Green's functions.
     """
 
+    funcDevice = E.device
     # Fermi distribution for calculating lesser and greater Green's functions
     f = fermi_distribution(E, mu, temperature, particle_type)
 
@@ -36,7 +37,7 @@ def lead_decimation(E: torch.Tensor, t: torch.Tensor, epsilon0: torch.Tensor, mu
     pseduo_scalar = -E if particle_type == 'h' else E
 
     # Create a batch of identity matrices, one for each energy value
-    identity_matrix = torch.eye(t.size(0), dtype=torch.complex64, device=E.device).unsqueeze(0)
+    identity_matrix = torch.eye(t.size(0), dtype=torch.complex64, device=funcDevice).unsqueeze(0)
     
     # Expand the identity matrix to match the batch size of E
     identity_matrix = identity_matrix.expand(E.size(0), -1, -1)
@@ -54,7 +55,7 @@ def lead_decimation(E: torch.Tensor, t: torch.Tensor, epsilon0: torch.Tensor, mu
     E_mat = epsilon_s + (H10 @ torch.linalg.inv(omega - H00)) @ H01
 
     # Mask to track which elements have reached the desired accuracy
-    mask = torch.ones(E.size(0), dtype=torch.bool, device=E.device)
+    mask = torch.ones(E.size(0), dtype=torch.bool, device=funcDevice)
 
     # Iterate until desired accuracy is reached for all elements
     while mask.any():

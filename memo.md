@@ -1,0 +1,2 @@
+To make all things get done in GPU, E should be inited at GPU, the device of E it's the standard intermeidate tesor's device choose to follow.
+Also lead's properties, central's properties should be checked.
