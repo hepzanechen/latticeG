@@ -18,10 +18,11 @@ def construct_ginv_tlc(lead:Lead, Ncentre: int, NLi: int) -> torch.Tensor:
     torch.Tensor
         Combined tunneling matrix for both electron and hole parts.
     """
+    funcDevice = lead.V1alpha.device
     lambda_ = lead.lambda_  # Counting field lambda
 
     # Construct tLC_e (electron part)
-    tLC_e = torch.zeros((Ncentre, NLi), dtype=torch.complex64, device=lead.V1alpha.device)
+    tLC_e = torch.zeros((Ncentre, NLi), dtype=torch.complex64, device=funcDevice)
 
     # Counting fields appear as phase factors
     cos_lambda = torch.cos(lambda_ / 2)

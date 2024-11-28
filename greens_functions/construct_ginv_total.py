@@ -1,20 +1,20 @@
 import torch
-from .construct_ginv_central import construct_ginv_central
-from .add_ginv_leads import add_ginv_leads
-from .construct_ginv_tlc import construct_ginv_tlc
+from greens_functions.construct_ginv_central import construct_ginv_central
+from greens_functions.add_ginv_leads import add_ginv_leads
+from greens_functions.construct_ginv_tlc import construct_ginv_tlc
 
-
-def construct_ginv_total(H_BdG: torch.Tensor, E: torch.Tensor, eta: torch.Tensor, leads_info: list) -> torch.Tensor:
+def construct_ginv_total(H_BdG: torch.Tensor, E_batch: torch.Tensor, eta: float, leads_info: list) -> torch.Tensor:
     """
-    Construct the total G inverse matrix for the system, including the central region and the leads.
+    Construct the combined inverse Green's function matrix for the entire system,
+    including the central region and leads, handling batch energies.
 
     Parameters:
     -----------
     H_BdG : torch.Tensor
-        Hamiltonian of the central region in BdG formalism.
-    E : torch.Tensor
-        Energy value.
-    eta : torch.Tensor
+        The BdG Hamiltonian of the central region (N_c x N_c).
+    E_batch : torch.Tensor
+        Batch of energy values (batch_size x 1).
+    eta : float
         Small imaginary part for regularization.
     leads_info : list
         List of Lead objects containing lead parameters.
@@ -22,33 +22,53 @@ def construct_ginv_total(H_BdG: torch.Tensor, E: torch.Tensor, eta: torch.Tensor
     Returns:
     --------
     torch.Tensor
-        Combined G inverse matrix for the entire system.
+        Combined G inverse matrix for the entire system (batch_size x N_total x N_total).
     """
-    # Construct Ginv_central
-    Ginv_central = construct_ginv_central(H_BdG, E, eta)
-    Ncentre = int(Ginv_central.size(0) / 4)
+    funcDevice = E_batch.device
+    batch_size = E_batch.size(0)
 
-    # Number of leads
-    num_leads = len(leads_info)
+    # Construct Ginv_central (batch_size x N_c x N_c)
+    Ginv_central = construct_ginv_central(H_BdG, E_batch, eta)  # Now handles batched E
 
-    # Add leads diagonal part
-    Ginv_total_blkdiag = add_ginv_leads(Ginv_central, leads_info, E)
+    # Number of lattice sites in the central region
+    Ncentre = int(H_BdG.size(0) / 2)  # Assuming H_BdG is (2 * Ncentre) x (2 * Ncentre)
 
-    # Initialize tLCBlk matrix with zeros
-    tLC_blk = torch.zeros_like(Ginv_total_blkdiag)
 
-    # Position to place tLC
-    tLC_position = Ginv_central.size(0)
+    # Add leads diagonal part (batch_size x N_total x N_total)
+    Ginv_total_blkdiag = add_ginv_leads(Ginv_central, leads_info, E_batch)
 
-    # Loop through each lead, constructing tLC and integrating into Ginv_total
-    for i in range(num_leads):
-        lead = leads_info[i]
-        NLi = lead.t.size(0)  # Number of lattice sites in lead 'i'
-        tLCi = construct_ginv_tlc(lead, Ncentre, NLi)
-        tLC_blk[:4 * Ncentre, tLC_position:tLC_position + 4 * NLi] = tLCi
-        tLC_position += 4 * NLi
+    # Initialize tLC_blk matrix with zeros (batch_size x N_total x N_total)
+    Ginv_totalBlkdiag_size = Ginv_total_blkdiag.size(1)
+    tLC_blk = torch.zeros((batch_size, Ginv_totalBlkdiag_size, Ginv_totalBlkdiag_size), dtype=torch.complex64, device=funcDevice)
 
-    # Combine Ginv_total_blkdiag and tLC_blk to form Ginv_total
-    Ginv_total = Ginv_total_blkdiag + tLC_blk + tLC_blk.T.conj()
+    # Current index after central region in Ginv_total_blkdiag
+    current_index = Ginv_central.size(1)
 
-    return Ginv_total
+    # Index range for tLC's row indices in Ginv_total_blkdiag
+    idx_central_start = 0
+    idx_central_end = Ginv_central.size(1)
+
+    # Loop over each lead to construct and embed tLC and tLC^T
+    for lead in leads_info:
+        NLi = lead.t.size(0)  # Number of sites in the lead
+        NLi_BdG_RAK = NLi * 2 * 2  # 2 from Nambu space, 2 from RAK Keldysh space
+
+        # Construct tLC (does not depend on E, so no batch dimension)
+        tLC_single = construct_ginv_tlc(lead, Ncentre, NLi)
+
+        # Embed tLC into tLC_blk
+
+        idx_lead_start = current_index
+        idx_lead_end = current_index + NLi_BdG_RAK
+
+        # Upper right block (central to lead)
+        Ginv_total_blkdiag[:, idx_central_start:idx_central_end, idx_lead_start:idx_lead_end] = tLC_single
+
+        # Lower left block (lead to central), transpose and take Hermitian conjugate
+        Ginv_total_blkdiag[:, idx_lead_start:idx_lead_end, idx_central_start:idx_central_end] = tLC_single.T.conj()
+
+        # Move to the next block position
+        current_index += NLi_BdG_RAK
+
+
+    return Ginv_total_blkdiag
