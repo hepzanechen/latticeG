@@ -26,7 +26,7 @@ class Lead:
         # Construct matrices
         self.t = t_lead * torch.eye(Ny, dtype=torch.complex64)  # Hopping within the lead
         lead_inter_chains = t_lead * torch.diag(torch.ones(Ny - 1), 1)
-        lead_inter_chains = lead_inter_chains + lead_inter_chains.T
+        lead_inter_chains = lead_inter_chains + lead_inter_chains.T.conj()
         self.epsilon0 = lead_inter_chains  # Onsite energy matrix within the lead
         self.V1alpha = t_lead_central * torch.eye(Ny, dtype=torch.complex64)  # Coupling to central region
 
