@@ -20,7 +20,7 @@ class Lead:
         """
         self.mu = mu
         self.temperature = temperature
-        self.lambda_ = torch.tensor(0,dtype=torch.float32,requires_grad=True,device=mu.device)  # Assuming lambda is initialized as zero
+        # self.lambda_ = torch.tensor(0,dtype=torch.float32,requires_grad=True,device=mu.device)  # Assuming lambda is initialized as zero
         self.position = None  # Position will be set later
 
         # Construct matrices
