@@ -18,9 +18,11 @@ class Lead:
         t_lead : float, optional
             Hopping parameter within the lead (default is 20).
         """
+        funcDevice = mu.device
         self.mu = mu
         self.temperature = temperature
-        # self.lambda_ = torch.tensor(0,dtype=torch.float32,requires_grad=True,device=mu.device)  # Assuming lambda is initialized as zero
+        # Note: lambda_ will be initialized and overwritten later in calcation_cf_autograd.py
+        self.lambda_ = torch.tensor(0,dtype=torch.float32,requires_grad=True,device=funcDevice)  # Assuming lambda is initialized as zero
         self.position = None  # Position will be set later
 
         # Construct matrices
