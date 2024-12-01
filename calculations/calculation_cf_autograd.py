@@ -1,111 +1,122 @@
 import torch
+from typing import List, Dict, Any
+from hamiltonians import Lead
+from torch.func import jacrev, vmap
 from greens_functions.construct_ginv_total import construct_ginv_total
 
-def calculation_cf_autograd(E: torch.Tensor, H_BdG: torch.Tensor, eta: torch.Tensor, leads_info: list) -> dict:
+def calculation_cf_autograd(
+    H_BdG: torch.Tensor,
+    E_batch: torch.Tensor,
+    eta: float,
+    leads_info: List[Lead]
+) -> Dict[str, Any]:
     """
-    Calculates the generating function and its derivatives up to the 4th order for both real and imaginary parts.
+    Calculates the generating function and its derivatives up to the 4th order
+    for both real and imaginary parts, handling a batch of energies efficiently
+    using torch.func.jacrev and vmap.
 
     Parameters:
     -----------
-    E : torch.Tensor
-        Energy value.
+    E_batch : torch.Tensor
+        Batch of energy values (batch_size,).
     H_BdG : torch.Tensor
         Hamiltonian of the central region in BdG formalism.
-    eta : torch.Tensor
+    eta : float
         Small imaginary part for regularization.
-    leads_info : list
+    leads_info : List[Any]
         List of Lead objects containing lead parameters.
 
     Returns:
     --------
-    dict
-        A dictionary containing the generating function matrix and its derivatives up to the 4th order for both real and imaginary parts.
+    Dict[str, Any]
+        Dictionary containing the generating function and its derivatives up to
+        the 4th order for both real and imaginary parts.
     """
-    # Initialize results dictionary
-    results = {}
+    funcDevice = E_batch.device
     num_leads = len(leads_info)
 
-    # Set lambda tensor with requires_grad=True for autograd
-    lambda_tensor = torch.zeros(num_leads, dtype=torch.float32, requires_grad=True)
+    # Initialize lambda tensor
+    lambda_tensor = torch.zeros(num_leads, dtype=torch.float32, device=funcDevice).requires_grad_(True)
 
-    # Update lead lambda values
-    for i, lead in enumerate(leads_info):
-        lead.lambda_ = lambda_tensor[i]
+    def gen_func(lambda_vals, E):
+        # Update lead lambda values
+        for i, lead in enumerate(leads_info):
+            lead.lambda_ = lambda_vals[i]
 
-    # Construct Ginv_total
-    Ginv_total = construct_ginv_total(H_BdG=H_BdG, E=E, eta=eta, leads_info=leads_info)
+        # Construct Ginv_total for this energy
+        Ginv_total = construct_ginv_total(
+            H_BdG=H_BdG,
+            E_batch=E,
+            eta=eta,
+            leads_info=leads_info
+        )
 
-    # Compute the generating function
-    gen_func = torch.logdet(Ginv_total)
+        # Compute the generating function: log(det(Ginv_total))
+        gen_func_value = torch.logdet(Ginv_total)  # Scalar complex tensor
+        # Return real and imaginary parts
+        return gen_func_value.real, gen_func_value.imag  # Each is scalar
 
-    # Extract real and imaginary parts of generating function
-    gen_func_real = gen_func.real
-    gen_func_imag = gen_func.imag
+    # Vectorized over batch; outputs are tuples, so we handle them separately
+    batched_real_func = lambda l: vmap(lambda E: gen_func(l, E)[0])(E_batch)
+    batched_imag_func = lambda l: vmap(lambda E: gen_func(l, E)[1])(E_batch)
 
-    # Store the generating function values
-    results['genFuncValueReal'] = gen_func_real.item()
-    results['genFuncValueImag'] = gen_func_imag.item()
+    # Compute generating function values
+    gen_func_real = batched_real_func(lambda_tensor)  # Shape: (batch_size,)
+    gen_func_imag = batched_imag_func(lambda_tensor)  # Shape: (batch_size,)
 
-    # First-order derivative: Real part
-    first_order_grad_real = torch.autograd.grad(gen_func_real, lambda_tensor, create_graph=True)[0]
-    # First-order derivative: Imaginary part
-    first_order_grad_imag = torch.autograd.grad(gen_func_imag, lambda_tensor, create_graph=True)[0]
+    # First-order derivatives
+    jacobian_real = jacrev(batched_real_func)(lambda_tensor)  # Shape: (num_leads, batch_size)
+    jacobian_imag = jacrev(batched_imag_func)(lambda_tensor)  # Shape: (num_leads, batch_size)
 
-    # Store first-order derivatives
-    results['gradientsZero'] = {1: {'real': first_order_grad_real, 'imag': first_order_grad_imag}}
+    # Transpose to shape (batch_size, num_leads)
+    jacobian_real = jacobian_real.T
+    jacobian_imag = jacobian_imag.T
 
     # Second-order derivatives
-    second_order_grads_real = []
-    second_order_grads_imag = []
+    hessian_real = jacrev(jacrev(batched_real_func))(lambda_tensor)  # Shape: (num_leads, num_leads, batch_size)
+    hessian_imag = jacrev(jacrev(batched_imag_func))(lambda_tensor)
 
-    for i in range(num_leads):
-        # Compute the second-order gradient for real part
-        second_order_grad_real = torch.autograd.grad(first_order_grad_real[i], lambda_tensor, create_graph=True, retain_graph=True)[0]
-        second_order_grads_real.append(second_order_grad_real)
+    # Transpose to shape (batch_size, num_leads, num_leads)
+    hessian_real = hessian_real.permute(2, 0, 1)
+    hessian_imag = hessian_imag.permute(2, 0, 1)
 
-        # Compute the second-order gradient for imaginary part
-        second_order_grad_imag = torch.autograd.grad(first_order_grad_imag[i], lambda_tensor, create_graph=True, retain_graph=True)[0]
-        second_order_grads_imag.append(second_order_grad_imag)
+    # Third and Fourth-order derivatives (optional and may be computationally intensive)
+    third_order_real = jacrev(jacrev(jacrev(batched_real_func)))(lambda_tensor)  # Shape: (num_leads, num_leads, num_leads, batch_size)
+    third_order_imag = jacrev(jacrev(jacrev(batched_imag_func)))(lambda_tensor)
 
-    # Stack second-order gradients into tensors
-    second_order_grads_real = torch.stack(second_order_grads_real)
-    second_order_grads_imag = torch.stack(second_order_grads_imag)
-    results['gradientsZero'][2] = {'real': second_order_grads_real, 'imag': second_order_grads_imag}
+    third_order_real = third_order_real.permute(3, 0, 1, 2)
+    third_order_imag = third_order_imag.permute(3, 0, 1, 2)
 
-    # Third-order derivatives
-    third_order_grads_real = []
-    third_order_grads_imag = []
+    fourth_order_real = jacrev(jacrev(jacrev(jacrev(batched_real_func))))(lambda_tensor)
+    fourth_order_imag = jacrev(jacrev(jacrev(jacrev(batched_imag_func))))(lambda_tensor)
 
-    for i in range(second_order_grads_real.numel()):
-        # Compute the third-order gradient for real part
-        third_order_grad_real = torch.autograd.grad(second_order_grads_real.view(-1)[i], lambda_tensor, create_graph=True, retain_graph=True)[0]
-        third_order_grads_real.append(third_order_grad_real)
+    fourth_order_real = fourth_order_real.permute(4, 0, 1, 2, 3)
+    fourth_order_imag = fourth_order_imag.permute(4, 0, 1, 2, 3)
 
-        # Compute the third-order gradient for imaginary part
-        third_order_grad_imag = torch.autograd.grad(second_order_grads_imag.view(-1)[i], lambda_tensor, create_graph=True, retain_graph=True)[0]
-        third_order_grads_imag.append(third_order_grad_imag)
-
-    # Stack third-order gradients into tensors
-    third_order_grads_real = torch.stack(third_order_grads_real)
-    third_order_grads_imag = torch.stack(third_order_grads_imag)
-    results['gradientsZero'][3] = {'real': third_order_grads_real, 'imag': third_order_grads_imag}
-
-    # Fourth-order derivatives
-    fourth_order_grads_real = []
-    fourth_order_grads_imag = []
-
-    for i in range(third_order_grads_real.numel()):
-        # Compute the fourth-order gradient for real part
-        fourth_order_grad_real = torch.autograd.grad(third_order_grads_real.view(-1)[i], lambda_tensor, create_graph=True, retain_graph=True)[0]
-        fourth_order_grads_real.append(fourth_order_grad_real)
-
-        # Compute the fourth-order gradient for imaginary part
-        fourth_order_grad_imag = torch.autograd.grad(third_order_grads_imag.view(-1)[i], lambda_tensor, create_graph=True, retain_graph=True)[0]
-        fourth_order_grads_imag.append(fourth_order_grad_imag)
-
-    # Stack fourth-order gradients into tensors
-    fourth_order_grads_real = torch.stack(fourth_order_grads_real)
-    fourth_order_grads_imag = torch.stack(fourth_order_grads_imag)
-    results['gradientsZero'][4] = {'real': fourth_order_grads_real, 'imag': fourth_order_grads_imag}
+    # Store results
+    results: Dict[str, Any] = {
+        'genFuncZero': {
+            'real': gen_func_real,
+            'imag': gen_func_imag
+        },
+        'gradientsZero': {
+            1: {
+                'real': jacobian_real,
+                'imag': jacobian_imag
+            },
+            2: {
+                'real': hessian_real,
+                'imag': hessian_imag
+            },
+            3: {
+                'real': third_order_real,
+                'imag': third_order_imag
+            },
+            4: {
+                'real': fourth_order_real,
+                'imag': fourth_order_imag
+            }
+        }
+    }
 
     return results
