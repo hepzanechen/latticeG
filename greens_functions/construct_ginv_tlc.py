@@ -39,6 +39,6 @@ def construct_ginv_tlc(lead:Lead, Ncentre: int, NLi: int) -> torch.Tensor:
     tLC_h = -tLC_e.conj()
 
     # Combine electron and hole parts
-    tLC_combined = torch.kron(tLC_e, torch.tensor([[1, 0], [0, 0]], dtype=torch.complex64)) + torch.kron(tLC_h, torch.tensor([[0, 0], [0, 1]], dtype=torch.complex64))
+    tLC_combined = torch.kron(tLC_e, torch.tensor([[1, 0], [0, 0]], dtype=torch.complex64,device=funcDevice)) + torch.kron(tLC_h, torch.tensor([[0, 0], [0, 1]], dtype=torch.complex64,device=funcDevice))
 
     return tLC_combined
