@@ -122,8 +122,24 @@ class CentralBdG(Central):
         pairing_matrix = torch.eye(self.Ny * self.Nx, dtype=torch.complex64,device=self.funcDevice) * self.Delta
         H_full_BdG = torch.kron(self.H_full, torch.tensor([[1, 0], [0, 0]], dtype=torch.complex64,device=self.funcDevice)) + \
                      torch.kron(-self.H_full.conj(), torch.tensor([[0, 0], [0, 1]], dtype=torch.complex64,device=self.funcDevice)) + \
-                     torch.kron(pairing_matrix, torch.tensor([[0, 1], [1, 0]], dtype=torch.complex64,device=self.funcDevice))
+                     torch.kron(pairing_matrix, torch.tensor([[0, 1], [0, 0]], dtype=torch.complex64,device=self.funcDevice))+ \
+                     torch.kron(pairing_matrix.conj(), torch.tensor([[0, 0], [1, 0]], dtype=torch.complex64,device=self.funcDevice))
         return H_full_BdG
 
     def __repr__(self):
         return f"CentralBdG(Ny={self.Ny}, Nx={self.Nx}, t_y={self.t_y}, t_x={self.t_x}, Delta={self.Delta})"
+
+class DisorderedCentralBdG(DisorderedCentral):
+    def __init__(self, Ny, Nx, t_y, t_x, Delta, disorder_strength):
+        super().__init__(Ny, Nx, t_y, t_x, disorder_strength)
+        self.Delta = Delta
+        self.H_full_BdG = self._construct_bdg_with_pairing()
+
+    def _construct_bdg_with_pairing(self) -> torch.Tensor:
+        """Constructs the BdG Hamiltonian with superconducting pairing."""
+        pairing_matrix = torch.eye(self.Ny * self.Nx, dtype=torch.complex64, device=self.H_full.device) * self.Delta
+        H_full_BdG = torch.kron(self.H_full, torch.tensor([[1, 0], [0, 0]], dtype=torch.complex64, device=self.H_full.device)) + \
+                     torch.kron(-self.H_full.conj(), torch.tensor([[0, 0], [0, 1]], dtype=torch.complex64, device=self.H_full.device)) + \
+                     torch.kron(pairing_matrix, torch.tensor([[0, 1], [0, 0]], dtype=torch.complex64, device=self.H_full.device)) + \
+                     torch.kron(pairing_matrix.conj(), torch.tensor([[0, 0], [1, 0]], dtype=torch.complex64, device=self.H_full.device))
+        return H_full_BdG
