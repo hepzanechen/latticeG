@@ -2,7 +2,8 @@ import torch
 from hamiltonians.Lead import Lead
 def construct_ginv_tlc(lead:Lead, Ncentre: int, NLi: int) -> torch.Tensor:
     """
-    Construct the tunneling matrix (tLC_combined) for the lead and central region, including counting fields.
+    Construct the tunneling matrix (tLC_combined) for the lead and central region, 
+    including counting fields.
 
     Parameters:
     -----------
@@ -39,6 +40,7 @@ def construct_ginv_tlc(lead:Lead, Ncentre: int, NLi: int) -> torch.Tensor:
     tLC_h = -tLC_e.conj()
 
     # Combine electron and hole parts
-    tLC_combined = torch.kron(tLC_e, torch.tensor([[1, 0], [0, 0]], dtype=torch.complex64,device=funcDevice)) + torch.kron(tLC_h, torch.tensor([[0, 0], [0, 1]], dtype=torch.complex64,device=funcDevice))
+    tLC_combined = torch.kron(tLC_e, torch.tensor([[1, 0], [0, 0]], dtype=torch.complex64,device=funcDevice)) 
+    + torch.kron(tLC_h, torch.tensor([[0, 0], [0, 1]], dtype=torch.complex64,device=funcDevice))
 
     return tLC_combined
