@@ -37,9 +37,6 @@ def construct_ginv_total(H_BdG: torch.Tensor, E_batch: torch.Tensor, eta: float,
     # Add leads diagonal part (batch_size x N_total x N_total)
     Ginv_total_blkdiag = add_ginv_leads(Ginv_central, leads_info, E_batch)
 
-    # Initialize tLC_blk matrix with zeros (batch_size x N_total x N_total)
-    Ginv_totalBlkdiag_size = Ginv_total_blkdiag.size(1)
-    tLC_blk = torch.zeros((batch_size, Ginv_totalBlkdiag_size, Ginv_totalBlkdiag_size), dtype=torch.complex64, device=funcDevice)
 
     # Current index after central region in Ginv_total_blkdiag
     current_index = Ginv_central.size(1)
@@ -63,12 +60,11 @@ def construct_ginv_total(H_BdG: torch.Tensor, E_batch: torch.Tensor, eta: float,
 
         # Upper right block (central to lead)
         Ginv_total_blkdiag[:, idx_central_start:idx_central_end, idx_lead_start:idx_lead_end] = tLC_single
-
         # Lower left block (lead to central), transpose and take Hermitian conjugate
         Ginv_total_blkdiag[:, idx_lead_start:idx_lead_end, idx_central_start:idx_central_end] = tLC_single.T.conj()
 
+
         # Move to the next block position
         current_index += NLi_BdG_RAK
-
 
     return Ginv_total_blkdiag

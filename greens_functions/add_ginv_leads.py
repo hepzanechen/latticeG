@@ -103,6 +103,8 @@ def add_ginv_leads(Ginv_central: torch.Tensor, leads_info: list, E_batch: torch.
         Ginv_totalBlkdiag[:, idx_start:idx_half, idx_start:idx_half] = Ginv_Lead_R
         Ginv_totalBlkdiag[:, idx_start:idx_half, idx_half:idx_end] = Ginv_Lead_K
         Ginv_totalBlkdiag[:, idx_half:idx_end, idx_half:idx_end] = Ginv_Lead_A
+        zeros = torch.zeros_like(Ginv_Lead_R)
+        Ginv_totalBlkdiag[:, idx_half:idx_end, idx_start:idx_half] = zeros
         current_index = idx_end
 
     return Ginv_totalBlkdiag

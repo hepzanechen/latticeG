@@ -31,7 +31,7 @@ def construct_ginv_tlc(lead:Lead, Ncentre: int, NLi: int) -> torch.Tensor:
     phase_factor = torch.stack([torch.stack([cos_lambda, sin_lambda]), torch.stack([sin_lambda, cos_lambda])])
     # Assign values to tLC_e based on lead's position
     for idx in range(len(lead.position)):
-        tLC_e[lead.position[idx], :] = -lead.V1alpha[idx, :]
+        tLC_e[lead.position[idx], :] = lead.V1alpha[idx, :]
 
     # Apply phase factor to electron part
     tLC_e = torch.kron(phase_factor, tLC_e)
@@ -40,7 +40,9 @@ def construct_ginv_tlc(lead:Lead, Ncentre: int, NLi: int) -> torch.Tensor:
     tLC_h = -tLC_e.conj()
 
     # Combine electron and hole parts
-    tLC_combined = torch.kron(tLC_e, torch.tensor([[1, 0], [0, 0]], dtype=torch.complex64,device=funcDevice)) 
-    + torch.kron(tLC_h, torch.tensor([[0, 0], [0, 1]], dtype=torch.complex64,device=funcDevice))
+    tLC_combined = (
+        torch.kron(tLC_e, torch.tensor([[1, 0], [0, 0]], dtype=torch.complex64, device=funcDevice)) +
+        torch.kron(tLC_h, torch.tensor([[0, 0], [0, 1]], dtype=torch.complex64, device=funcDevice))
+    )
 
     return tLC_combined
