@@ -4,8 +4,13 @@ the device is contrled by funcDevice, set to Ebatch device or lead.v1laph device
 
 * lead_decimation calc hole and electron seperately and combine them in add_ginv_lead, and inv the whole, this may be improved by 1. pass in H_lead_BdG together, 2. use the hole and electron seperately to calc the hole and electron seperately, and combine them in add_ginv_lead use symmetric property.
 * tLC can only be real number for now
-* since $\psi_{1}^{\dagger}\psi_{2}-\psi_{2}^{\dagger}\psi_{1}$ is current,
-we should let tLch=-tLce^{\dagger}
+* since $$ is current, the hermitial part automatically handles the minius sign needed becuae $\exp{(-i \lambda)}$ also reverse sign due to hermitian.
+
+$ \ln S \propto \frac{1}{2}(\psi_{1}^{\dagger}(E)\psi_{2}(E) + \psi_{2}^{\dagger}(E)\psi_{1}(E)) - \frac{1}{2}(\psi_{2}(-E)\psi_{1}^{\dagger}(-E) + \psi_{1}(-E)\psi_{2}^{\dagger}(-E)) $
+
+$-E$ means $\omega\psi_{1}^{\dagger}\psi_{1} \rightarrow -\omega\psi_{1}\psi_{1}^{\dagger}$ corresponding hole energy is $-E$ and this is due to p-h symmetry redundancy, while $-\frac{1}{2}(\psi_{2}(-E)\psi_{1}^{\dagger}(-E))$ means $t\psi_{1}^{\dagger}\psi_{2} \rightarrow -t\psi_{2}\psi_{1}^{\dagger}$
+
+It should be $tLch = -tLce^{\dagger}$
 
 * eta can causing to lead current conservation fails, so we should let eta=0
 
