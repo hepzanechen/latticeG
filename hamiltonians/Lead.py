@@ -22,7 +22,7 @@ class Lead:
         self.mu = mu
         self.temperature = temperature
         # Note: lambda_ will be initialized and overwritten later in calcation_cf_autograd.py
-        self.lambda_ = torch.tensor(0,dtype=torch.float32,requires_grad=True,device=self.funcDevice)  # Assuming lambda is initialized as zero
+        self.lambda_ = torch.tensor(0.1,dtype=torch.float32,requires_grad=True,device=self.funcDevice)  # Assuming lambda is initialized as zero
         self.position = None  # Position will be set later
 
         # Construct matrices
