@@ -23,9 +23,15 @@ def fermi_distribution(E: torch.Tensor, mu: torch.Tensor, temperature: torch.Ten
     """
     # Assume data is already on GPU
     if particle_type == 'e':
-        f = 1 / (torch.exp((E - mu) / temperature) + 1)
+        if temperature == 0:
+           f = (E<=mu).float()
+        else:
+            f = 1 / (torch.exp((E - mu) / temperature) + 1)
     elif particle_type == 'h':
-        f = 1 / (torch.exp((E + mu) / temperature) + 1)
+        if temperature ==0:
+            f = (E<=-mu).float()
+        else:
+            f = 1 / (torch.exp((E + mu) / temperature) + 1)
     else:
         raise ValueError('Invalid type. Choose either "e" for electron or "h" for hole.')
     

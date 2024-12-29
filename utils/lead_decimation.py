@@ -1,7 +1,13 @@
 import torch
 from .fermi_distribution import fermi_distribution
 
-def lead_decimation(E: torch.Tensor, t: torch.Tensor, epsilon0: torch.Tensor, mu: torch.Tensor, temperature: torch.Tensor, particle_type: str, desired_accuracy: float = 1e-25) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+def lead_decimation(E: torch.Tensor, 
+                    t: torch.Tensor, 
+                    epsilon0: torch.Tensor, 
+                    mu: torch.Tensor, 
+                    temperature: torch.Tensor, 
+                    particle_type: str, 
+                    desired_accuracy: float = 1e-25) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Calculate the lead's Green's functions using the decimation method.
 
