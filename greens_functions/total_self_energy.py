@@ -8,7 +8,6 @@ def calculate_total_self_energy(
     E_batch: torch.Tensor,
     leads_info: list,
     system_dim: int,
-    Ny: int,
 ) -> Tuple[torch.Tensor, list]:
     """Calculate total self-energy from all leads in BdG space.
     We first compute full lead surface Green's functions in BdG space.
@@ -20,7 +19,6 @@ def calculate_total_self_energy(
         E_batch: Batch of energy values (batch_size,)
         leads_info: List of lead objects
         system_dim: Dimension of the system (without BdG)
-        Ny: Number of sites in y direction
         
     Returns:
         Tuple of (total self-energy matrix, updated leads_info)
@@ -42,7 +40,8 @@ def calculate_total_self_energy(
         gLr_h, _, _, _ = lead_decimation(
             E_batch, lead.t, lead.epsilon0, lead.mu, lead.temperature, 'h'
         )
-        
+        # Initialize coupling matrices for electron and hole parts without batch dimension
+        lead_iSize = len(lead.position)
         # Construct total surface Green's function in BdG space using batch-parallel einsum
         kron_e = torch.tensor([[1, 0], [0, 0]], dtype=torch.complex64, device=device)
         kron_h = torch.tensor([[0, 0], [0, 1]], dtype=torch.complex64, device=device)
@@ -54,72 +53,31 @@ def calculate_total_self_energy(
         # Sum the electron and hole contributions
         lead_iGLeadSurface = gLr_e_BdG + gLr_h_BdG
         
-        # Initialize coupling matrices for electron and hole parts
-        lead_iSize = len(lead.position)
-        lead_iV1alpha_electron = torch.zeros((batch_size, 2*lead_iSize, system_dim_BdG), 
-                                           dtype=torch.complex64, device=device)
-        lead_iV1alpha_hole = torch.zeros_like(lead_iV1alpha_electron)
+
+       
+        # First construct the basic tunneling matrix (without BdG)
+        tCL = torch.zeros((system_dim, lead_iSize), dtype=torch.complex64, device=device)
         
-        # Construct coupling matrices
-        for lead_iSite_j in range(lead_iSize):
-            lead_iSite_j_electron = 2 * lead_iSite_j
-            lead_iSite_j_hole = 2 * lead_iSite_j + 1
-            
-            # Extract position and coupling strength
-            positions = lead.position[lead_iSite_j]
-            V1alpha = lead.V1alpha[lead_iSite_j]
-            
-            # Process each connection point
-            for k, (x, y, flavor) in enumerate(positions):
-                # Calculate system position in BdG space
-                position = (x - 1) * Ny + y
-                pos_electron = 2 * position - 1
-                pos_hole = 2 * position
-                
-                # Construct BdG coupling based on flavor
-                if flavor == 0:  # Normal electron coupling
-                    V1alpha_electron = torch.tensor([[V1alpha[k], 0], [0, 0]], 
-                                                  dtype=torch.complex64, device=device)
-                    V1alpha_hole = torch.tensor([[0, 0], [0, -V1alpha[k].conj()]], 
-                                              dtype=torch.complex64, device=device)
-                elif flavor == 1:  # MZM1 coupling
-                    V1alpha_electron = (1/torch.sqrt(torch.tensor(2.0))) * torch.tensor(
-                        [[V1alpha[k], V1alpha[k]], [0, 0]], 
-                        dtype=torch.complex64, device=device
-                    )
-                    V1alpha_hole = (1/torch.sqrt(torch.tensor(2.0))) * torch.tensor(
-                        [[0, 0], [-V1alpha[k].conj(), -V1alpha[k].conj()]], 
-                        dtype=torch.complex64, device=device
-                    )
-                elif flavor == 2:  # MZM2 coupling
-                    V1alpha_electron = (1/torch.sqrt(torch.tensor(2.0))) * torch.tensor(
-                        [[-1j*V1alpha[k], 1j*V1alpha[k]], [0, 0]], 
-                        dtype=torch.complex64, device=device
-                    )
-                    V1alpha_hole = (1/torch.sqrt(torch.tensor(2.0))) * torch.tensor(
-                        [[0, 0], [1j*V1alpha[k].conj(), -1j*V1alpha[k].conj()]], 
-                        dtype=torch.complex64, device=device
-                    )
-                
-                # Embed coupling matrices into the total coupling matrices
-                lead_iV1alpha_electron[:, lead_iSite_j_electron:lead_iSite_j_hole+1, 
-                                     pos_electron:pos_hole+1] = V1alpha_electron.unsqueeze(0)
-                lead_iV1alpha_hole[:, lead_iSite_j_electron:lead_iSite_j_hole+1, 
-                                 pos_electron:pos_hole+1] = V1alpha_hole.unsqueeze(0)
+        # Assign values directly using lead positions
+        for idx in range(len(lead.position)):
+            tCL[lead.position[idx], :] = lead.V1alpha[idx, :]
         
-        # Calculate self-energies in BdG space
-        lead_iSigma_electron = lead_iV1alpha_electron.transpose(-1, -2) @ \
-                              lead_iGLeadSurface @ lead_iV1alpha_electron
-        lead_iSigma_hole = lead_iV1alpha_hole.transpose(-1, -2) @ \
-                          lead_iGLeadSurface @ lead_iV1alpha_hole
+        
+        # Construct electron and hole parts
+        lead_iV1alpha_electron = torch.kron(tCL,kron_e)
+        lead_iV1alpha_hole = -torch.kron(-tCL.conj(),kron_h)
+        
+        # Calculate self-energies in BdG space - broadcasting will handle batch dimension
+        lead_iSigma_electron = lead_iV1alpha_electron.T @ lead_iGLeadSurface @ lead_iV1alpha_electron
+        lead_iSigma_hole = lead_iV1alpha_hole.T @ lead_iGLeadSurface @ lead_iV1alpha_hole
         
         # Update total self-energy
         Sigma_retarded_Total += lead_iSigma_electron + lead_iSigma_hole
         
         # Store gamma matrices for transmission calculations
         leads_info[i].Gamma = {
-            'e': 1j * (lead_iSigma_electron - lead_iSigma_electron.transpose(-1, -2).conj()),
-            'h': 1j * (lead_iSigma_hole - lead_iSigma_hole.transpose(-1, -2).conj())
+            'e': torch.real(1j * (lead_iSigma_electron - lead_iSigma_electron.transpose(-1, -2).conj())).to(torch.complex64),
+            'h': torch.real(1j * (lead_iSigma_hole - lead_iSigma_hole.transpose(-1, -2).conj())).to(torch.complex64)
         }
     
     return Sigma_retarded_Total, leads_info 

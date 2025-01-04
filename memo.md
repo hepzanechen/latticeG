@@ -15,3 +15,5 @@ It should be $tLch = -tLce^{\dagger}$
 * eta can causing to lead current conservation fails, so we should let eta=0
 
 * since electron and hole are $E<->-E$ symmetry, so there are issues if $\mu_1=-\mu_2$, then physically there should be curren, but the calculated current is not zero, so we should make hole part $-E$ in the gen_ginv_lead.
+
+In direct calculation, the noise is calculated by the following formula:

@@ -4,13 +4,13 @@ import torch
 from typing import Dict, List, Tuple, Optional
 from .total_self_energy import calculate_total_self_energy
 from utils.fermi_distribution import fermi_distribution
+from utils.batch_trace import batch_trace
 
 def calculate_transport_properties(
     E_batch: torch.Tensor,
     H_total: torch.Tensor,
     leads_info: list,
     temperature: torch.Tensor,
-    ny: int,
     eta: torch.Tensor,
 ) -> Dict[str, torch.Tensor]:
     """
@@ -21,11 +21,18 @@ def calculate_transport_properties(
         H_total: Total Hamiltonian including leads (N, N)
         leads_info: List of lead objects
         temperature: Temperature for each energy point (batch_size,)
-        ny: Number of sites in y direction
         eta: Small imaginary part (batch_size,)
         
     Returns:
         Dictionary containing transport properties
+
+    Notes:
+        - Current and noise: float32
+        - T[batch, lead_i, lead_j, alpha, beta]: float32
+        - leads_info[i].Gamma[alpha]: complex64
+        - rho_jj: float32
+        - rho_electron: float32
+        - rho_hole: float32
     """
     device = E_batch.device
     batch_size = E_batch.size(0)
@@ -34,7 +41,7 @@ def calculate_transport_properties(
     
     # Calculate total self-energy and update leads_info with Gamma matrices
     sigma_total, leads_info = calculate_total_self_energy(
-        E_batch, leads_info, system_size, ny, eta
+        E_batch, leads_info, system_size
     )
     
     # Calculate retarded Green's function
@@ -60,99 +67,115 @@ def calculate_transport_properties(
     total_dos_e = torch.sum(rho_e, dim=1)  # Sum over electron sites
     total_dos_h = torch.sum(rho_h, dim=1)  # Sum over hole sites
     
-    # Calculate transmission and noise
+    # Initialize noise and current
     num_leads = len(leads_info)
-    transmission = torch.zeros((batch_size, num_leads, num_leads), dtype=torch.float32, device=device)
-    andreev = torch.zeros_like(transmission)
-    noise = torch.zeros_like(transmission)
-    current = torch.zeros((batch_size, num_leads), dtype=torch.float32, device=device)
-    
+    noise = torch.zeros((batch_size, num_leads, num_leads), dtype=torch.float32, device=device)
+    current = torch.zeros((batch_size, num_leads), dtype=torch.float32, device=device)   
+    ptypes = ['h', 'e']  
+    # Initialize 4D transmission tensor (batch, lead_i, lead_j, particle_type)
+    T = torch.zeros((batch_size, num_leads, num_leads, 2, 2), 
+                    dtype=torch.float32, device=device)
+
     # Calculate common sum for noise calculations
     common_sum = sum(
         lead.Gamma[ptype] * fermi_distribution(E_batch, lead.mu, temperature, ptype).unsqueeze(-1).unsqueeze(-1)
         for lead in leads_info
-        for ptype in ['e', 'h']
+        for ptype in ptypes
     )
     
-    # Calculate transmission and noise
+    # Calculate transmission coefficients T(i,j,alpha,beta)
     for i in range(num_leads):
         for j in range(num_leads):
-            for alpha_idx, alpha in enumerate(['h', 'e']):
-                for beta_idx, beta in enumerate(['h', 'e']):
-                    # Calculate transmission
+            for alpha_idx, alpha in enumerate(ptypes):
+                for beta_idx, beta in enumerate(ptypes):
                     if i == j and alpha == beta:
-                        T_ij = (leads_info[i].t.size(0) + 
-                               torch.diagonal(
-                                   leads_info[i].Gamma[alpha] @ G_retarded @
-                                   leads_info[i].Gamma[alpha] @ G_retarded.conj().transpose(-1, -2) +
-                                   1j * leads_info[i].Gamma[alpha] @
-                                   (G_retarded.conj().transpose(-1, -2) - G_retarded),
-                                   dim1=1, dim2=2
-                               ).sum(1))
-                    else:
-                        T_ij = torch.diagonal(
-                            leads_info[i].Gamma[alpha] @ G_retarded @
-                            leads_info[j].Gamma[beta] @ G_retarded.conj().transpose(-1, -2),
-                            dim1=1, dim2=2
-                        ).sum(1)
-                    
-                    # Store transmission
-                    if alpha == 'e' and beta == 'e':
-                        transmission[:, i, j] = torch.real(T_ij)
-                    elif alpha == 'h' and beta == 'e':
-                        andreev[:, i, j] = torch.real(T_ij)
-                    
-                    # Calculate noise contributions
-                    sign_alpha = 1 if alpha == 'e' else -1
-                    sign_beta = 1 if beta == 'e' else -1
-                    
-                    # First term (shot noise)
-                    if i == j and alpha == beta:
-                        f_alpha = fermi_distribution(E_batch, leads_info[i].mu, temperature, alpha)
-                        noise[:, i, j] += leads_info[i].t.size(0) * f_alpha * (1 - f_alpha)
-                        current[:, i] += sign_alpha * leads_info[i].t.size(0) * f_alpha
-                    
-                    # Second term (cross correlations)
-                    f_beta = fermi_distribution(E_batch, leads_info[j].mu, temperature, beta)
-                    current[:, i] -= sign_alpha * T_ij * f_beta
-                    
-                    if i == j and alpha == beta:
-                        # Third term (thermal noise)
-                        for k in range(num_leads):
-                            for gamma in ['h', 'e']:
-                                noise[:, i, j] += T_ij * fermi_distribution(
-                                    E_batch, leads_info[k].mu, temperature, gamma
-                                )
-                        
-                        # Fourth term (quantum noise)
-                        delta_term = fermi_distribution(
-                            E_batch, leads_info[i].mu, temperature, alpha
-                        ).unsqueeze(-1).unsqueeze(-1) * (
-                            leads_info[i].Gamma[alpha] / torch.norm(leads_info[i].Gamma[alpha])
+                        T[:, i, j, alpha_idx, beta_idx] = torch.real(
+                            leads_info[i].t.size(0) + 
+                            batch_trace(
+                                leads_info[i].Gamma[alpha] @ G_retarded @
+                                leads_info[i].Gamma[alpha] @ G_retarded.conj().transpose(-1, -2) +
+                                1j * leads_info[i].Gamma[alpha] @
+                                (G_retarded.conj().transpose(-1, -2) - G_retarded)
+                            )
                         )
                     else:
+                        T[:, i, j, alpha_idx, beta_idx] = torch.real(
+                            batch_trace(
+                                leads_info[i].Gamma[alpha] @ G_retarded @
+                                leads_info[j].Gamma[beta] @ G_retarded.conj().transpose(-1, -2)
+                            )
+                        )
+
+    for i in range(num_leads):
+        for j in range(num_leads):
+            for alpha_idx, alpha in enumerate(ptypes):
+                for beta_idx, beta in enumerate(ptypes):
+                    # Sign factors
+                    sign_alpha = 1 if alpha_idx == 1 else -1  # 1 for 'e', -1 for 'h'
+                    sign_beta = 1 if beta_idx == 1 else -1
+                    f_i_alpha = fermi_distribution(E_batch, leads_info[i].mu, temperature, alpha)
+                    f_j_beta = fermi_distribution(E_batch, leads_info[j].mu, temperature, beta)
+                    # First term (diagonal terms)
+                    if i == j and alpha == beta:
+                        noise[:, i, j] += leads_info[i].t.size(0) * f_i_alpha * (1 - f_i_alpha)
+                        current[:, i] += sign_alpha * leads_info[i].t.size(0) * f_i_alpha
+
+                    # Second term (cross correlations)
+                    current[:, i] -= sign_alpha * T[:, i, j, alpha_idx, beta_idx] * f_j_beta
+                    
+                    noise[:, i, j] -= sign_alpha * sign_beta * (
+                        T[:, j, i, beta_idx, alpha_idx] * f_i_alpha * (1 - f_i_alpha) +
+                        T[:, i, j, alpha_idx, beta_idx] * f_j_beta * (1 - f_j_beta)
+                    )
+
+                    # Third term
+                    if i == j and alpha == beta:
+                        for k in range(num_leads):
+                            for gamma_idx, gamma in enumerate(ptypes):
+                                noise[:, i, j] += T[:, j, k, beta_idx, gamma_idx] * \
+                                    fermi_distribution(E_batch, leads_info[k].mu, temperature, gamma)
+
+                    # Fourth term calculation
+                    if i == j and alpha == beta:
+                        # Extract diagonal elements and reconstruct diagonal matrix using diagonal_embed
+                        diagonals = torch.diagonal(leads_info[i].Gamma[alpha], dim1=-2, dim2=-1)  # Gets batch of diagonals
+                        diag_matrices = torch.diag_embed(diagonals)  # Reconstructs batch of diagonal matrices
+                        delta_term = f_i_alpha.unsqueeze(-1).unsqueeze(-1) * \
+                            (diag_matrices != 0).to(torch.complex64)
+                    else:
                         delta_term = 0
-                    
-                    # Calculate noise terms
-                    ga_term = 1j * leads_info[j].Gamma[beta] @ G_retarded.conj().transpose(-1, -2) * \
-                             fermi_distribution(E_batch, leads_info[j].mu, temperature, beta).unsqueeze(-1).unsqueeze(-1)
-                    gr_term = -1j * leads_info[j].Gamma[beta] @ G_retarded * \
-                             fermi_distribution(E_batch, leads_info[i].mu, temperature, alpha).unsqueeze(-1).unsqueeze(-1)
-                    sum_gamma_term = leads_info[j].Gamma[beta] @ G_retarded @ \
-                                   common_sum @ G_retarded.conj().transpose(-1, -2)
-                    
-                    s_s_product = delta_term + ga_term + gr_term + sum_gamma_term
-                    noise[:, i, j] -= sign_alpha * sign_beta * torch.diagonal(
-                        s_s_product @ s_s_product.conj().transpose(-1, -2),
-                        dim1=1, dim2=2
-                    ).sum(1)
+
+                    # Calculate noise terms for ij
+                    ga_term_ij = 1j * leads_info[j].Gamma[beta] @ G_retarded.conj().transpose(-1, -2) * \
+                                f_j_beta.unsqueeze(-1).unsqueeze(-1)
+                    gr_term_ij = -1j * leads_info[j].Gamma[beta] @ G_retarded * \
+                                f_i_alpha.unsqueeze(-1).unsqueeze(-1)
+                    sum_gamma_term_ij = leads_info[j].Gamma[beta] @ G_retarded @ \
+                                      common_sum @ G_retarded.conj().transpose(-1, -2)
+
+                    # Calculate noise terms for ji
+                    ga_term_ji = 1j * leads_info[i].Gamma[alpha] @ G_retarded.conj().transpose(-1, -2) * \
+                                f_i_alpha.unsqueeze(-1).unsqueeze(-1)
+                    gr_term_ji = -1j * leads_info[i].Gamma[alpha] @ G_retarded * \
+                                f_j_beta.unsqueeze(-1).unsqueeze(-1)
+                    sum_gamma_term_ji = leads_info[i].Gamma[alpha] @ G_retarded @ \
+                                      common_sum @ G_retarded.conj().transpose(-1, -2)
+
+                    # Combine terms
+                    s_s_FermiProduct_ij = delta_term + ga_term_ij + gr_term_ij + sum_gamma_term_ij
+                    s_s_FermiProduct_ji = delta_term + ga_term_ji + gr_term_ji + sum_gamma_term_ji
+
+                    # Fourth term calculation
+                    noise[:, i, j] -= sign_alpha * sign_beta * torch.real(batch_trace(
+                        s_s_FermiProduct_ij @ s_s_FermiProduct_ji
+                    ))
     
     return {
         'rho_jj': rho_e,
         'rho_electron': total_dos_e,
         'rho_hole': total_dos_h,
-        'transmission': transmission,
-        'andreev': andreev,
+        'transmission': T[:, :, :, 1, 1],  # Electron-electron transmission
+        'andreev': T[:, :, :, 0, 1],      # Hole-electron transmission (Andreev)
         'current': current,
         'noise': noise
     } 
