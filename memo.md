@@ -17,3 +17,6 @@ It should be $tLch = -tLce^{\dagger}$
 * since electron and hole are $E<->-E$ symmetry, so there are issues if $\mu_1=-\mu_2$, then physically there should be curren, but the calculated current is not zero, so we should make hole part $-E$ in the gen_ginv_lead.
 
 In direct calculation, the noise is calculated by the following formula:
+$\begin{aligned}S_{ij}&=\frac{e^2}h\sum_{\alpha,\beta,k\gamma,l,\delta m\zeta,n,\eta}\operatorname{sgn}(\alpha)\operatorname{sgn}(\beta)\\&\times\int dE\:A_{k\gamma;l\delta}(i,E)A_{l\delta;k\gamma}(j,E)f_{k\gamma}(E)[1-f_{l\delta}(E)].\end{aligned}$
+The coefficient before 'T' related dimensionless terms: $\dot{S_{LL}}=\frac{e^3|V|}{\pi\hbar}\sum_nT_n\left(1-T_n\right).$, $S_P=\frac{e^3|V|}{\pi\hbar}\sum_nT_n=2e\langle I\rangle.$.
+current formula: $I_i=\frac eh\sum_{\alpha,j\in NS,\beta}\operatorname{sgn}(\alpha)[\delta_{ij}\delta_{\alpha\beta}-T_{ij}^{\alpha\beta}(E)]f_{j\beta}(E)$

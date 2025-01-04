@@ -64,12 +64,12 @@ def calculate_total_self_energy(
         
         
         # Construct electron and hole parts
-        lead_iV1alpha_electron = torch.kron(tCL,kron_e)
-        lead_iV1alpha_hole = -torch.kron(-tCL.conj(),kron_h)
+        tCL_electron = torch.kron(tCL,kron_e)
+        tCL_hole = -torch.kron(-tCL.conj(),kron_h)
         
         # Calculate self-energies in BdG space - broadcasting will handle batch dimension
-        lead_iSigma_electron = lead_iV1alpha_electron.T @ lead_iGLeadSurface @ lead_iV1alpha_electron
-        lead_iSigma_hole = lead_iV1alpha_hole.T @ lead_iGLeadSurface @ lead_iV1alpha_hole
+        lead_iSigma_electron = tCL_electron @ lead_iGLeadSurface @ tCL_electron.T
+        lead_iSigma_hole = tCL_hole @ lead_iGLeadSurface @ tCL_hole.T
         
         # Update total self-energy
         Sigma_retarded_Total += lead_iSigma_electron + lead_iSigma_hole
