@@ -28,9 +28,9 @@ def calculate_transport_properties(
 
     Notes:
         - Current and noise: float32
-        - T[batch, lead_i, lead_j, alpha, beta]: float32
+        - T[batchE, lead_i, lead_j, alpha, beta]: float32
         - leads_info[i].Gamma[alpha]: complex64
-        - rho_jj: float32
+        - rho_e_jj[batchE,Nx*Ny*orbNum*2fromBdG]: float32
         - rho_electron: float32
         - rho_hole: float32
     """
@@ -50,7 +50,7 @@ def calculate_transport_properties(
     eta_mat = eta.view(-1, 1, 1) * eye.unsqueeze(0)
     
     G_retarded = torch.linalg.solve(
-        E_mat + eta_mat - H_total.unsqueeze(0) - sigma_total,
+        E_mat + 1j*eta_mat - H_total.unsqueeze(0) - sigma_total,
         eye.unsqueeze(0).expand(batch_size, -1, -1)
     )
     
@@ -171,7 +171,7 @@ def calculate_transport_properties(
                     ))
     
     return {
-        'rho_jj': rho_e,
+        'rho_e_jj': rho_e,
         'rho_electron': total_dos_e,
         'rho_hole': total_dos_h,
         'transmission': T[:, :, :, 1, 1],  # Electron-electron transmission

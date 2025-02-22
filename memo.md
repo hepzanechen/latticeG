@@ -20,3 +20,15 @@ In direct calculation, the noise is calculated by the following formula:
 $\begin{aligned}S_{ij}&=\frac{e^2}h\sum_{\alpha,\beta,k\gamma,l,\delta m\zeta,n,\eta}\operatorname{sgn}(\alpha)\operatorname{sgn}(\beta)\\&\times\int dE\:A_{k\gamma;l\delta}(i,E)A_{l\delta;k\gamma}(j,E)f_{k\gamma}(E)[1-f_{l\delta}(E)].\end{aligned}$
 The coefficient before 'T' related dimensionless terms: $\dot{S_{LL}}=\frac{e^3|V|}{\pi\hbar}\sum_nT_n\left(1-T_n\right).$, $S_P=\frac{e^3|V|}{\pi\hbar}\sum_nT_n=2e\langle I\rangle.$.
 current formula: $I_i=\frac eh\sum_{\alpha,j\in NS,\beta}\operatorname{sgn}(\alpha)[\delta_{ij}\delta_{\alpha\beta}-T_{ij}^{\alpha\beta}(E)]f_{j\beta}(E)$
+
+## Unit
+1. $e=1$
+2. $\hbar=1$
+3. $\Phi_0=2\pi$
+
+Besides Nx,Ny is int, all other variables are initialized as torch.Tensor, and the device is set to funcDevice in the main function, for e.g. vortex_positions is a list of tuples of torch.Tensor.
+
+
+$v_F=\frac{ta}\hbar,$
+
+eta value should fit in E numpoints, for e.g. when eta is small E numpoints should be dense enough to trapz accurately.

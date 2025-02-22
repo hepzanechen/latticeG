@@ -51,7 +51,7 @@ class Central:
 
 
 class DisorderedCentral(Central):
-    def __init__(self, Nx: int, Ny: int, t_x: torch.Tensor, t_y: torch.Tensor, deltaV: torch.Tensor, N_imp: int, xi: float):
+    def __init__(self, Nx: int, Ny: int, t_x: torch.Tensor, t_y: torch.Tensor, deltaV: torch.Tensor, N_imp: int, xi: torch.Tensor):
         """
         Initializes a disordered central Hamiltonian.
 
@@ -62,7 +62,7 @@ class DisorderedCentral(Central):
             Amplitude range for the disorder potential.
         N_imp : int
             Number of impurities in the lattice.
-        xi : float
+        xi : torch.Tensor
             Correlation length of the disorder potential.
         """
         super().__init__(Nx, Ny, t_x, t_y)
@@ -202,362 +202,29 @@ class CentralBdGDisorder(CentralUniformDisorder):
         pass
 
 
-class VortexHamiltonian(CentralBdG):
-    """Class for constructing BdG Hamiltonian with vortices."""
-    
-    def __init__(self, Ny: int, Nx: int, t_y: torch.Tensor, t_x: torch.Tensor, 
-                 Delta_0: float, xi_0: float, lambda_L: float, vortex_positions: List[Tuple[float, float]],
-                 mu: float = 0.0, m: float = 2.0, v_F: float = 1.0):
-        """Initialize vortex Hamiltonian.
-        
-        Args:
-            Ny, Nx: System dimensions
-            t_y, t_x: Hopping parameters
-            Delta_0: Base superconducting gap
-            xi_0: Superconducting coherence length
-            lambda_L: London penetration depth
-            vortex_positions: List of (x,y) positions of vortices
-            mu: Chemical potential
-            m: Mass parameter
-            v_F: Fermi velocity
-        """
-        super().__init__(Ny, Nx, t_y, t_x, Delta_0)
-        self.xi_0 = xi_0
-        self.lambda_L = lambda_L
-        self.vortex_positions = vortex_positions
-        self.mu = mu
-        self.m = m
-        self.v_F = v_F
-        #self.Phi_0 = 2.067833848 * 1e-15  # Magnetic flux quantum in Wb
-        self.Phi_0 = 1  # Magnetic flux quantum in custom unit
-        
-        # Pauli matrices
-        self.sigma_x = torch.tensor([[0, 1], [1, 0]], dtype=torch.complex64, device=self.funcDevice)
-        self.sigma_y = torch.tensor([[0, -1j], [1j, 0]], dtype=torch.complex64, device=self.funcDevice)
-        self.sigma_z = torch.tensor([[1, 0], [0, -1]], dtype=torch.complex64, device=self.funcDevice)
-        self.tau_0 = torch.eye(2, dtype=torch.complex64, device=self.funcDevice)
-        
-        # Construct full Hamiltonian with vortices
-        self.H_full_BdG = self._construct_vortex_hamiltonian()
-        
-    def _calculate_delta(self, x: float, y: float) -> torch.Tensor:
-        """Calculate superconducting gap at position (x,y)."""
-        delta = torch.ones(1, dtype=torch.complex64, device=self.funcDevice) * self.Delta
-        
-        for x_j, y_j in self.vortex_positions:
-            r = torch.sqrt((x - x_j)**2 + (y - y_j)**2)
-            if r == 0:
-                # In the vortex core, the gap is zero
-                return torch.zeros(1, dtype=torch.complex64, device=self.funcDevice)
-            
-            # Amplitude factor
-            tanh_factor = torch.tanh(r / self.xi_0)
-            
-            # Phase factor
-            phase = torch.complex((x - x_j)/r, (y - y_j)/r)
-            
-            delta *= tanh_factor * phase
-            
-        return delta
-        
-    def _calculate_vector_potential(self, x: float, y: float) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Calculate vector potential at position (x,y)."""
-        Ax = torch.zeros(1, dtype=torch.float32, device=self.funcDevice)
-        Ay = torch.zeros(1, dtype=torch.float32, device=self.funcDevice)
-        
-        for x_j, y_j in self.vortex_positions:
-            r = torch.sqrt((x - x_j)**2 + (y - y_j)**2)
-            if r == 0:
-                # In the vortex core, the vector potential is screened zero
-                return torch.zeros(1, dtype=torch.float32, device=self.funcDevice), torch.zeros(1, dtype=torch.float32, device=self.funcDevice)
-                
-            # Calculate K1 Bessel function (using scipy and converting to torch)
-            from scipy.special import k1
-            K1_factor = torch.tensor(k1(r.cpu().numpy() / self.lambda_L), 
-                                   device=self.funcDevice)
-            
-            # Common factor
-            common = self.Phi_0 * (1/r - K1_factor/self.lambda_L)
-            
-            # Add contribution to Ax and Ay
-            Ax += (y - y_j) * common / r
-            Ay += (x - x_j) * common / r
-            
-        return Ax, Ay
-        
-    def _calculate_peierls_phase(self, x1: float, y1: float, x2: float, y2: float) -> torch.Tensor:
-        """Calculate Peierls phase between two points."""
-        # Midpoint for vector potential
-        x_mid = (x1 + x2) / 2
-        y_mid = (y1 + y2) / 2
-        
-        # Get vector potential at midpoint
-        Ax, Ay = self._calculate_vector_potential(x_mid, y_mid)
-        
-        # Calculate line integral A·dl
-        dx = x2 - x1
-        dy = y2 - y1
-        
-        phase = -(Ax * dx + Ay * dy) * self.e / self.hbar
-        return torch.exp(1j * phase)
-        
-    def _construct_onsite_term(self) -> torch.Tensor:
-        """Construct onsite term H_0(m)."""
-        return (self.v_F * self.m * self.sigma_z - self.mu * self.tau_0)
-        
-    def _construct_hopping_terms(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Construct nearest-neighbor hopping terms H_nn."""
-        # x-direction hopping
-        t_x = -self.v_F * self.sigma_z/2 + 1j * self.v_F * self.sigma_x/2
-        
-        # y-direction hopping
-        t_y = -self.v_F * self.sigma_z/2 + 1j * self.v_F * self.sigma_y/2
-        
-        return t_y, t_x
-        
-    def _construct_vortex_hamiltonian(self) -> torch.Tensor:
-        """Construct full BdG Hamiltonian with vortices."""
-        h_size = self.Nx * self.Ny
-        h_bdg = torch.zeros((2*h_size, 2*h_size), dtype=torch.complex64, device=self.funcDevice)
-        
-        # Onsite terms
-        h_onsite = self._construct_onsite_term()
-        t_y, t_x = self._construct_hopping_terms()
-        
-        # Fill Hamiltonian
-        for ix in range(self.Nx):
-            for iy in range(self.Ny):
-                pos = ix * self.Ny + iy
-                x, y = ix + 0.5, iy + 0.5  # Center coordinates
-                
-                # Onsite energy and pairing
-                delta = self._calculate_delta(x, y)
-                h_bdg[2*pos:2*pos+2, 2*pos:2*pos+2] = h_onsite
-                h_bdg[2*pos:2*pos+2, 2*h_size+2*pos:2*h_size+2*pos+2] = -1j * delta * self.sigma_y
-                h_bdg[2*h_size+2*pos:2*h_size+2*pos+2, 2*pos:2*pos+2] = 1j * delta.conj() * self.sigma_y
-                h_bdg[2*h_size+2*pos:2*h_size+2*pos+2, 2*h_size+2*pos:2*h_size+2*pos+2] = -h_onsite.conj()
-                
-                # Hopping terms with Peierls phase
-                # x-direction
-                if ix < self.Nx - 1:
-                    phase = self._calculate_peierls_phase(x, y, x+1, y)
-                    h_nn = t_x * phase
-                    next_pos = (ix+1) * self.Ny + iy
-                    
-                    # Electron part
-                    h_bdg[2*pos:2*pos+2, 2*next_pos:2*next_pos+2] = h_nn
-                    h_bdg[2*next_pos:2*next_pos+2, 2*pos:2*pos+2] = h_nn.conj().T
-                    
-                    # Hole part
-                    h_bdg[2*h_size+2*pos:2*h_size+2*pos+2, 2*h_size+2*next_pos:2*h_size+2*next_pos+2] = \
-                        -h_nn.conj() * phase.conj()
-                    h_bdg[2*h_size+2*next_pos:2*h_size+2*next_pos+2, 2*h_size+2*pos:2*h_size+2*pos+2] = \
-                        -(h_nn.conj() * phase.conj()).conj().T
-                
-                # y-direction
-                if iy < self.Ny - 1:
-                    phase = self._calculate_peierls_phase(x, y, x, y+1)
-                    h_nn = t_y * phase
-                    next_pos = ix * self.Ny + (iy+1)
-                    
-                    # Electron part
-                    h_bdg[2*pos:2*pos+2, 2*next_pos:2*next_pos+2] = h_nn
-                    h_bdg[2*next_pos:2*next_pos+2, 2*pos:2*pos+2] = h_nn.conj().T
-                    
-                    # Hole part
-                    h_bdg[2*h_size+2*pos:2*h_size+2*pos+2, 2*h_size+2*next_pos:2*h_size+2*next_pos+2] = \
-                        -h_nn.conj() * phase.conj()
-                    h_bdg[2*h_size+2*next_pos:2*h_size+2*next_pos+2, 2*h_size+2*pos:2*h_size+2*pos+2] = \
-                        -(h_nn.conj() * phase.conj()).conj().T
-        
-        return h_bdg
-    
-class VortexHamiltonian2D(CentralBdG):
-    """Class for constructing 2D topological surface state BdG Hamiltonian with vortices."""
-    
-    def __init__(self, Ny: int, Nx: int, t_y: torch.Tensor, t_x: torch.Tensor, 
-                 Delta_0: float, xi_0: float, lambda_L: float, vortex_positions: List[Tuple[float, float]],
-                 mu: float = 0.0, v: float = 1.0):
-        """Initialize vortex Hamiltonian for 2D topological surface state.
-        
-        Args:
-            Ny, Nx: System dimensions
-            t_y, t_x: Hopping parameters
-            Delta_0: Base superconducting gap
-            xi_0: Superconducting coherence length
-            lambda_L: London penetration depth
-            vortex_positions: List of (x,y) positions of vortices
-            mu: Chemical potential
-            v: Velocity of surface Dirac fermions
-        """
-        super().__init__(Ny, Nx, t_y, t_x, Delta_0)
-        self.xi_0 = xi_0
-        self.lambda_L = lambda_L
-        self.vortex_positions = vortex_positions
-        self.mu = mu
-        self.v = v
-        self.Phi_0 = 1.0  # Magnetic flux quantum in natural units
-        
-        # Pauli matrices in spin space
-        self.sigma_x = torch.tensor([[0, 1], [1, 0]], dtype=torch.complex64, device=self.funcDevice)
-        self.sigma_y = torch.tensor([[0, -1j], [1j, 0]], dtype=torch.complex64, device=self.funcDevice)
-        self.sigma_z = torch.tensor([[1, 0], [0, -1]], dtype=torch.complex64, device=self.funcDevice)
-        
-        # Pauli matrices in particle-hole space
-        self.tau_x = torch.tensor([[0, 1], [1, 0]], dtype=torch.complex64, device=self.funcDevice)
-        self.tau_y = torch.tensor([[0, -1j], [1j, 0]], dtype=torch.complex64, device=self.funcDevice)
-        self.tau_z = torch.tensor([[1, 0], [0, -1]], dtype=torch.complex64, device=self.funcDevice)
-        
-        # Identity matrices
-        self.sigma_0 = torch.eye(2, dtype=torch.complex64, device=self.funcDevice)
-        self.tau_0 = torch.eye(2, dtype=torch.complex64, device=self.funcDevice)
-        
-        # Construct full Hamiltonian with vortices
-        self.H_full_BdG = self._construct_vortex_hamiltonian()
-        
-    def _calculate_delta(self, x: float, y: float) -> torch.Tensor:
-        """Calculate superconducting gap at position (x,y)."""
-        delta = torch.ones(1, dtype=torch.complex64, device=self.funcDevice) * self.Delta
-        
-        for x_j, y_j in self.vortex_positions:
-            r = torch.sqrt((x - x_j)**2 + (y - y_j)**2)
-            if r == 0:
-                return torch.zeros(1, dtype=torch.complex64, device=self.funcDevice)
-            
-            # Amplitude factor with tanh profile
-            tanh_factor = torch.tanh(r / self.xi_0)
-            
-            # Phase factor (x+iy)/r for p-wave like vortex
-            phase = ((x - x_j) + 1j*(y - y_j))/r
-            
-            delta *= tanh_factor * phase
-            
-        return delta
-        
-    def _calculate_vector_potential(self, x: float, y: float) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Calculate vector potential at position (x,y)."""
-        Ax = torch.zeros(1, dtype=torch.float32, device=self.funcDevice)
-        Ay = torch.zeros(1, dtype=torch.float32, device=self.funcDevice)
-        
-        for x_j, y_j in self.vortex_positions:
-            r = torch.sqrt((x - x_j)**2 + (y - y_j)**2)
-            if r == 0:
-                return torch.zeros(1, dtype=torch.float32, device=self.funcDevice), torch.zeros(1, dtype=torch.float32, device=self.funcDevice)
-                
-            # Calculate K1 Bessel function
-            from scipy.special import k1
-            K1_factor = torch.tensor(k1(r.cpu().numpy() / self.lambda_L), 
-                                   device=self.funcDevice)
-            
-            # Vector potential from London equation solution
-            common = self.Phi_0/(2*torch.pi*r) * (1 - r/self.lambda_L * K1_factor)
-            
-            # Add contribution in polar coordinates
-            Ax += -common * (y - y_j)/r  # -sin(θ) component
-            Ay += common * (x - x_j)/r   # cos(θ) component
-            
-        return Ax, Ay
-        
-    def _calculate_peierls_phase(self, x1: float, y1: float, x2: float, y2: float) -> torch.Tensor:
-        """Calculate Peierls phase between two points."""
-        # Midpoint for vector potential
-        x_mid = (x1 + x2) / 2
-        y_mid = (y1 + y2) / 2
-        
-        # Get vector potential at midpoint
-        Ax, Ay = self._calculate_vector_potential(x_mid, y_mid)
-        
-        # Calculate line integral A·dl
-        dx = x2 - x1
-        dy = y2 - y1
-        
-        phase = -(Ax * dx + Ay * dy)
-        return torch.exp(1j * phase)
-        
-    def _construct_kinetic_term(self) -> torch.Tensor:
-        """Construct kinetic term v[σx*px + σy*py] - μ."""
-        return -self.mu * self.sigma_0
-        
-    def _construct_vortex_hamiltonian(self) -> torch.Tensor:
-        """Construct full BdG Hamiltonian with vortices."""
-        h_size = self.Nx * self.Ny
-        h_bdg = torch.zeros((4*h_size, 4*h_size), dtype=torch.complex64, device=self.funcDevice)
-        
-        # Kinetic term
-        h_0 = self._construct_kinetic_term()
-        
-        # Fill Hamiltonian
-        for ix in range(self.Nx):
-            for iy in range(self.Ny):
-                pos = ix * self.Ny + iy
-                x, y = ix + 0.5, iy + 0.5  # Center coordinates
-                
-                # Calculate pairing at this site
-                delta = self._calculate_delta(x, y)
-                
-                # Block indices for this site
-                e_idx = slice(4*pos, 4*pos+2)  # Electron block
-                h_idx = slice(4*pos+2, 4*pos+4)  # Hole block
-                
-                # Diagonal blocks (kinetic terms)
-                h_bdg[e_idx, e_idx] = h_0
-                h_bdg[h_idx, h_idx] = -h_0.conj()
-                
-                # Off-diagonal blocks (pairing terms)
-                h_bdg[e_idx, h_idx] = delta * self.sigma_y
-                h_bdg[h_idx, e_idx] = delta.conj() * self.sigma_y
-                
-                # Hopping terms
-                # x-direction
-                if ix < self.Nx - 1:
-                    phase = self._calculate_peierls_phase(x, y, x+1, y)
-                    next_pos = (ix+1) * self.Ny + iy
-                    next_e_idx = slice(4*next_pos, 4*next_pos+2)
-                    next_h_idx = slice(4*next_pos+2, 4*next_pos+4)
-                    
-                    # Electron hopping
-                    h_nn = self.v * phase * self.sigma_x / 2
-                    h_bdg[e_idx, next_e_idx] = h_nn
-                    h_bdg[next_e_idx, e_idx] = h_nn.conj().T
-                    
-                    # Hole hopping
-                    h_bdg[h_idx, next_h_idx] = -h_nn.conj()
-                    h_bdg[next_h_idx, h_idx] = -(h_nn.conj()).conj().T
-                
-                # y-direction
-                if iy < self.Ny - 1:
-                    phase = self._calculate_peierls_phase(x, y, x, y+1)
-                    next_pos = ix * self.Ny + (iy+1)
-                    next_e_idx = slice(4*next_pos, 4*next_pos+2)
-                    next_h_idx = slice(4*next_pos+2, 4*next_pos+4)
-                    
-                    # Electron hopping
-                    h_nn = self.v * phase * self.sigma_y / 2
-                    h_bdg[e_idx, next_e_idx] = h_nn
-                    h_bdg[next_e_idx, e_idx] = h_nn.conj().T
-                    
-                    # Hole hopping
-                    h_bdg[h_idx, next_h_idx] = -h_nn.conj()
-                    h_bdg[next_h_idx, h_idx] = -(h_nn.conj()).conj().T
-        
-        return h_bdg
 
-class TopologicalSurface2D(Central):
+
+class TopologicalSurface2D:
     """Class for constructing 2D topological surface state Hamiltonian."""
     
     def __init__(self, Ny: int, Nx: int, t_y: torch.Tensor, t_x: torch.Tensor,
-                 mu: torch.Tensor , v: torch.Tensor ):
+                 mu: torch.Tensor, B: torch.Tensor, M: torch.Tensor):
         """Initialize 2D topological surface state Hamiltonian.
         
         Args:
             Ny, Nx: System dimensions
-            t_y, t_x: Hopping parameters
+            t_y, t_x: Spin-orbit coupling parameters
             mu: Chemical potential
-            v: Velocity of surface Dirac fermions
+            M: Mass parameter
         """
-        super().__init__(Ny, Nx, t_y, t_x)
+        self.Ny = Ny
+        self.Nx = Nx
+        self.t_y = t_y
+        self.t_x = t_x
         self.mu = mu
-        self.v = v
+        self.B = B
+        self.M = M
+        self.funcDevice = t_x.device
         
         # Pauli matrices in spin space
         self.sigma_x = torch.tensor([[0, 1], [1, 0]], dtype=torch.complex64, device=self.funcDevice)
@@ -571,19 +238,19 @@ class TopologicalSurface2D(Central):
     def _construct_chain_y(self) -> torch.Tensor:
         """Constructs the Hamiltonian matrix for a single chain along y-direction."""
         # Chemical potential and onsite terms
-        H_onsite = -2 * self.sigma_z - self.mu * self.sigma_0
+        H_onsite = self.B *(-self.M - 2 )* self.sigma_z - self.mu * self.sigma_0
         H_chain = torch.kron(torch.eye(self.Ny, dtype=torch.complex64, device=self.funcDevice), 
                            H_onsite)
         
-        # Nearest neighbor hopping along y (4/3 factor from improved regularization)
-        t_nn_y = (4/3) * (self.sigma_z + 1j * self.sigma_y) / 2
+        # Nearest neighbor hopping along y
+        t_nn_y = (4/3)*(self.B * self.sigma_z + 1j * self.t_y * self.sigma_y)/2
         H_nn_y = torch.kron(
             torch.diag(torch.ones(self.Ny - 1, dtype=torch.complex64, device=self.funcDevice), 1),
             t_nn_y
         )
         
-        # Next-nearest neighbor hopping along y (-1/6 factor from improved regularization)
-        t_nnn_y = (-1/6) * (2 * self.sigma_z + 1j * self.sigma_y) / 2
+        # Next-nearest neighbor hopping along y
+        t_nnn_y = (-1/6) * (2 * self.B * self.sigma_z + 1j * self.t_y * self.sigma_y)/2
         H_nnn_y = torch.kron(
             torch.diag(torch.ones(self.Ny - 2, dtype=torch.complex64, device=self.funcDevice), 2),
             t_nnn_y
@@ -597,14 +264,14 @@ class TopologicalSurface2D(Central):
     def _construct_topological_hamiltonian(self) -> torch.Tensor:
         """Constructs the full 2D topological surface state Hamiltonian."""
         # Construct hopping along x-direction (nearest neighbor)
-        t_nn_x = (4/3) * (self.sigma_z + 1j * self.sigma_x) / 2
+        t_nn_x = (4/3)*(self.B * self.sigma_z + 1j * self.t_x * self.sigma_x)/2
         H_nn_x = torch.kron(
             torch.diag(torch.ones(self.Nx - 1, dtype=torch.complex64, device=self.funcDevice), 1),
             torch.kron(torch.eye(self.Ny, dtype=torch.complex64, device=self.funcDevice), t_nn_x)
         )
         
         # Next-nearest neighbor hopping along x
-        t_nnn_x = (-1/6) * (2 * self.sigma_z + 1j * self.sigma_x) / 2
+        t_nnn_x = (-1/6) * (2 * self.B * self.sigma_z + 1j * self.t_x * self.sigma_x)/2
         H_nnn_x = torch.kron(
             torch.diag(torch.ones(self.Nx - 2, dtype=torch.complex64, device=self.funcDevice), 2),
             torch.kron(torch.eye(self.Ny, dtype=torch.complex64, device=self.funcDevice), t_nnn_x)
@@ -622,44 +289,74 @@ class MZMVortexHamiltonian(TopologicalSurface2D):
     """Class for constructing BdG Hamiltonian with Majorana zero mode vortices."""
     
     def __init__(self, Ny: int, Nx: int, t_y: torch.Tensor, t_x: torch.Tensor, 
-                 Delta_0: float, xi_0: float, lambda_L: float, vortex_positions: List[Tuple[float, float]],
-                 mu: float = 0.0, v: float = 1.0):
-        """Initialize vortex Hamiltonian for 2D topological surface state.
-        
-        Args:
-            Ny, Nx: System dimensions
-            t_y, t_x: Hopping parameters
-            Delta_0: Base superconducting gap
-            xi_0: Superconducting coherence length
-            lambda_L: London penetration depth
-            vortex_positions: List of (x,y) positions of vortices
-            mu: Chemical potential
-            v: Velocity of surface Dirac fermions
-        """
-        super().__init__(Ny, Nx, t_y, t_x, mu, v)
+                 Delta_0: torch.Tensor, xi_0: torch.Tensor, lambda_L: torch.Tensor, vortex_positions: List[Tuple[torch.Tensor, torch.Tensor]],
+                 mu: torch.Tensor, B: torch.Tensor, M: torch.Tensor):
+        """Initialize vortex Hamiltonian for 2D topological surface state."""
+        super().__init__(Ny, Nx, t_y, t_x, mu,B, M)
         self.Delta = Delta_0
         self.xi_0 = xi_0
-        self.lambda_L = lambda_L
+        self.lambda_L = lambda_L.item()
         self.vortex_positions = vortex_positions
-        self.Phi_0 = 1.0  # Magnetic flux quantum in natural units
+        self.hbar = torch.tensor(1, dtype=torch.float32, device=self.funcDevice)
+        self.e = torch.tensor(1, dtype=torch.float32, device=self.funcDevice)
+        self.Phi_0 = torch.pi * self.hbar / self.e # Half Magnetic flux quantum in natural units
         
-        # Pauli matrices in particle-hole space
-        self.tau_x = torch.tensor([[0, 1], [1, 0]], dtype=torch.complex64, device=self.funcDevice)
-        self.tau_y = torch.tensor([[0, -1j], [1j, 0]], dtype=torch.complex64, device=self.funcDevice)
-        self.tau_z = torch.tensor([[1, 0], [0, -1]], dtype=torch.complex64, device=self.funcDevice)
-        self.tau_0 = torch.eye(2, dtype=torch.complex64, device=self.funcDevice)
+        # Apply Peierls substitution to normal state Hamiltonian
+        self.H_full = self._apply_peierls_substitution(self.H_full)
         
         # Construct full BdG Hamiltonian with vortices
         self.H_full_BdG = self._construct_vortex_hamiltonian()
         
-    def _calculate_delta(self, x: float, y: float) -> torch.Tensor:
+    def _apply_peierls_substitution(self, h_normal: torch.Tensor) -> torch.Tensor:
+        """Apply Peierls substitution to modify hopping terms with vector potential."""
+        h_modified = h_normal.clone()
+        
+        # Loop over all sites
+        for ix in range(self.Nx):
+            for iy in range(self.Ny):
+                site1 = ix * self.Ny + iy
+                x1, y1 = torch.tensor(ix, dtype=torch.float32, device=self.funcDevice), torch.tensor(iy, dtype=torch.float32, device=self.funcDevice)  # Actual lattice positions
+                
+                # Only process right and up hoppings
+                neighbors = [
+                    (ix+1, iy),   # Right only
+                    (ix, iy+1),   # Up only
+                ]
+                
+                # Only process right2 and up2 for next nearest neighbors
+                nnn_neighbors = [
+                    (ix+2, iy),   # Right 2 only
+                    (ix, iy+2),   # Up 2 only
+                ]
+                
+                # Process neighbors
+                for nx, ny in neighbors + nnn_neighbors:
+                    if 0 <= nx < self.Nx and 0 <= ny < self.Ny:
+                        site2 = nx * self.Ny + ny
+                        x2, y2 = torch.tensor(nx, dtype=torch.float32, device=self.funcDevice), torch.tensor(ny, dtype=torch.float32, device=self.funcDevice)
+                        
+                        # Calculate Peierls phase
+                        phase = self._calculate_peierls_phase(x1, y1, x2, y2)
+                        
+                        # Modify hopping terms for all spin combinations
+                        for spin1 in [0, 1]:
+                            for spin2 in [0, 1]:
+                                idx1 = site1 * 2 + spin1
+                                idx2 = site2 * 2 + spin2
+                                if h_modified[idx1, idx2] != 0:
+                                    h_modified[idx1, idx2] *= phase
+                                    h_modified[idx2, idx1] = h_modified[idx1, idx2].conj()
+        
+        return h_modified
+    
+    def _calculate_delta(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Calculate superconducting gap at position (x,y)."""
         delta = torch.ones(1, dtype=torch.complex64, device=self.funcDevice) * self.Delta
         
         for x_j, y_j in self.vortex_positions:
             r = torch.sqrt((x - x_j)**2 + (y - y_j)**2)
             if r == 0:
-                return torch.zeros(1, dtype=torch.complex64, device=self.funcDevice)
+                return torch.zeros(1, dtype=torch.complex64, device=self.funcDevice)[0]
             
             # Amplitude factor with tanh profile
             tanh_factor = torch.tanh(r / self.xi_0)
@@ -668,10 +365,10 @@ class MZMVortexHamiltonian(TopologicalSurface2D):
             phase = ((x - x_j) + 1j*(y - y_j))/r
             
             delta *= tanh_factor * phase
-            
-        return delta
+            # Convert delta to scalar tensor by taking first element
+        return delta[0]
         
-    def _calculate_vector_potential(self, x: float, y: float) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _calculate_vector_potential(self, x: torch.Tensor, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Calculate vector potential at position (x,y)."""
         Ax = torch.zeros(1, dtype=torch.float32, device=self.funcDevice)
         Ay = torch.zeros(1, dtype=torch.float32, device=self.funcDevice)
@@ -695,37 +392,168 @@ class MZMVortexHamiltonian(TopologicalSurface2D):
             
         return Ax, Ay
         
-    def _calculate_peierls_phase(self, x1: float, y1: float, x2: float, y2: float) -> torch.Tensor:
+    def _calculate_peierls_phase(self, x1: torch.Tensor, y1: torch.Tensor, x2: torch.Tensor, y2: torch.Tensor) -> torch.Tensor:
         """Calculate Peierls phase between two points."""
         x_mid = (x1 + x2) / 2
         y_mid = (y1 + y2) / 2
         Ax, Ay = self._calculate_vector_potential(x_mid, y_mid)
         dx = x2 - x1
         dy = y2 - y1
-        phase = -(Ax * dx + Ay * dy)
-        return torch.exp(1j * phase)
-        
+        phase = self.e * (Ax * dx + Ay * dy) / self.hbar
+        # Convert phase to scalar tensor by taking first element
+        return torch.exp(1j * phase)[0]
+    
     def _construct_vortex_hamiltonian(self) -> torch.Tensor:
         """Construct full BdG Hamiltonian with vortices."""
-        h_size = self.Nx * self.Ny * 2  # Factor of 2 for spin
-        h_bdg = torch.zeros((2*h_size, 2*h_size), dtype=torch.complex64, device=self.funcDevice)
-        
-        # Embed normal state Hamiltonian in electron and hole sectors
-        h_bdg[:h_size, :h_size] = self.H_full
-        h_bdg[h_size:, h_size:] = -self.H_full.conj()
+        h_bdg = torch.kron(self.H_full, torch.tensor([[1, 0], [0, 0]], dtype=torch.complex64,device=self.funcDevice)) + \
+                torch.kron(-self.H_full.conj(), torch.tensor([[0, 0], [0, 1]], dtype=torch.complex64,device=self.funcDevice)) 
         
         # Add pairing terms
         for ix in range(self.Nx):
             for iy in range(self.Ny):
-                pos = (ix * self.Ny + iy) * 2  # *2 for spin
-                x, y = ix + 0.5, iy + 0.5
-                
+                pos = (ix * self.Ny + iy) * 2 * 2  # *2 for spin and 2 for BdG
+                x, y = torch.tensor(ix, dtype=torch.float32, device=self.funcDevice), torch.tensor(iy, dtype=torch.float32, device=self.funcDevice)  # Use actual lattice positions
                 delta = self._calculate_delta(x, y)
-                
                 # Pairing in the basis |c_↑†,c_↑,c_↓†,c_↓⟩
                 h_bdg[pos, pos+3] = delta  # c_↑† to c_↓
                 h_bdg[pos+1, pos+2] = -delta.conj()  # c_↑ to c_↓†
                 h_bdg[pos+2, pos+1] = -delta  # c_↓† to c_↑
                 h_bdg[pos+3, pos] = delta.conj()  # c_↓ to c_↑†
         
-        return h_bdg 
+        return h_bdg
+
+    def visualize_vector_potential(self):
+        """Visualize vector potential field using quiver plot."""
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        # Create grid points
+        x = np.linspace(0, self.Nx-1, self.Nx)
+        y = np.linspace(0, self.Ny-1, self.Ny)
+        X, Y = np.meshgrid(x, y)
+        
+        # Calculate vector potential at each point
+        Ax = np.zeros((self.Ny, self.Nx))
+        Ay = np.zeros((self.Ny, self.Nx))
+        
+        for i in range(self.Nx):
+            for j in range(self.Ny):
+                x_tensor = torch.tensor(float(i), dtype=torch.float32, device=self.funcDevice)
+                y_tensor = torch.tensor(float(j), dtype=torch.float32, device=self.funcDevice)
+                Ax_t, Ay_t = self._calculate_vector_potential(x_tensor, y_tensor)
+                Ax[j,i] = Ax_t.cpu().numpy()
+                Ay[j,i] = Ay_t.cpu().numpy()
+        
+        # Create figure
+        plt.figure(figsize=(10, 8))
+        plt.quiver(X, Y, Ax, Ay)
+        
+        # Plot vortex positions
+        vortex_x = [pos[0] for pos in self.vortex_positions]
+        vortex_y = [pos[1] for pos in self.vortex_positions]
+        plt.plot(vortex_x, vortex_y, 'ro', label='Vortices')
+        
+        plt.title('Vector Potential Field')
+        plt.xlabel('x')
+        plt.ylabel('y')
+        plt.legend()
+        plt.colorbar()
+        plt.savefig('vector_potential.png')
+        plt.close()
+
+    def visualize_delta_field(self):
+        """Visualize superconducting order parameter."""
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        # Calculate Delta at each point
+        Delta_mag = np.zeros((self.Ny, self.Nx))
+        Delta_phase = np.zeros((self.Ny, self.Nx))
+        
+        for i in range(self.Nx):
+            for j in range(self.Ny):
+                x_tensor = torch.tensor(float(i), dtype=torch.float32, device=self.funcDevice)
+                y_tensor = torch.tensor(float(j), dtype=torch.float32, device=self.funcDevice)
+                delta = self._calculate_delta(x_tensor, y_tensor)
+                Delta_mag[j,i] = abs(delta.cpu().numpy())
+                Delta_phase[j,i] = np.angle(delta.cpu().numpy())
+        
+        # Plot magnitude
+        plt.figure(figsize=(15, 5))
+        
+        plt.subplot(121)
+        im1 = plt.imshow(Delta_mag, origin='lower', extent=[0, self.Nx-1, 0, self.Ny-1])
+        plt.colorbar(im1, label='|Δ|')
+        plt.title('Superconducting Gap Magnitude')
+        plt.xlabel('x')
+        plt.ylabel('y')
+        
+        # Plot vortex positions
+        vortex_x = [pos[0].cpu().numpy() for pos in self.vortex_positions]
+        vortex_y = [pos[1].cpu().numpy() for pos in self.vortex_positions]
+        plt.plot(vortex_x, vortex_y, 'wo', markeredgecolor='black', label='Vortices')
+        plt.legend()
+        
+        # Plot phase
+        plt.subplot(122)
+        im2 = plt.imshow(Delta_phase, origin='lower', extent=[0, self.Nx-1, 0, self.Ny-1], 
+                         cmap='hsv', vmin=-np.pi, vmax=np.pi)
+        plt.colorbar(im2, label='arg(Δ)')
+        plt.title('Superconducting Phase')
+        plt.xlabel('x')
+        plt.ylabel('y')
+        plt.plot(vortex_x, vortex_y, 'wo', markeredgecolor='black', label='Vortices')
+        plt.legend()
+        
+        plt.tight_layout()
+        plt.savefig('delta_field.png')
+        plt.close()
+
+    def visualize_peierls_phase(self):
+        """Visualize Peierls phase for nearest-neighbor hoppings."""
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        # Calculate Peierls phase for horizontal and vertical bonds
+        phase_x = np.zeros((self.Ny, self.Nx-1))  # horizontal bonds
+        phase_y = np.zeros((self.Ny-1, self.Nx))  # vertical bonds
+        
+        for i in range(self.Nx):
+            for j in range(self.Ny):
+                x1 = torch.tensor(float(i), dtype=torch.float32, device=self.funcDevice)
+                y1 = torch.tensor(float(j), dtype=torch.float32, device=self.funcDevice)
+                
+                # Horizontal bonds
+                if i < self.Nx-1:
+                    x2 = torch.tensor(float(i+1), dtype=torch.float32, device=self.funcDevice)
+                    phase = self._calculate_peierls_phase(x1, y1, x2, y1)
+                    phase_x[j,i] = np.angle(phase.cpu().numpy())
+                
+                # Vertical bonds
+                if j < self.Ny-1:
+                    y2 = torch.tensor(float(j+1), dtype=torch.float32, device=self.funcDevice)
+                    phase = self._calculate_peierls_phase(x1, y1, x1, y2)
+                    phase_y[j,i] = np.angle(phase.cpu().numpy())
+        
+        # Plot phases
+        plt.figure(figsize=(15, 5))
+        
+        plt.subplot(121)
+        im1 = plt.imshow(phase_x, origin='lower', extent=[0, self.Nx-2, 0, self.Ny-1], 
+                         cmap='hsv', vmin=-np.pi, vmax=np.pi)
+        plt.colorbar(im1, label='Phase (rad)')
+        plt.title('Peierls Phase - Horizontal Bonds')
+        plt.xlabel('x')
+        plt.ylabel('y')
+        
+        plt.subplot(122)
+        im2 = plt.imshow(phase_y, origin='lower', extent=[0, self.Nx-1, 0, self.Ny-2], 
+                         cmap='hsv', vmin=-np.pi, vmax=np.pi)
+        plt.colorbar(im2, label='Phase (rad)')
+        plt.title('Peierls Phase - Vertical Bonds')
+        plt.xlabel('x')
+        plt.ylabel('y')
+        
+        plt.tight_layout()
+        plt.savefig('peierls_phase.png')
+        plt.close()
