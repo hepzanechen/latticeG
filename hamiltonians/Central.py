@@ -238,21 +238,21 @@ class TopologicalSurface2D:
     def _construct_chain_y(self) -> torch.Tensor:
         """Constructs the Hamiltonian matrix for a single chain along y-direction."""
         # Chemical potential and onsite terms
-        H_onsite = self.B *(-self.M - 2 )* self.sigma_z - self.mu * self.sigma_0
+        H_onsite = (-2)* self.sigma_z - self.mu * self.sigma_0
         H_chain = torch.kron(torch.eye(self.Ny, dtype=torch.complex64, device=self.funcDevice), 
                            H_onsite)
         
         # Nearest neighbor hopping along y
-        t_nn_y = (4/3)*(self.B * self.sigma_z + 1j * self.t_y * self.sigma_y)/2
+        t_nn_y = (4/3)*(self.sigma_z + 1j*self.sigma_y)/2
         H_nn_y = torch.kron(
-            torch.diag(torch.ones(self.Ny - 1, dtype=torch.complex64, device=self.funcDevice), 1),
+            torch.diag(torch.ones(self.Ny - 1, dtype=torch.complex64, device=self.funcDevice), -1),
             t_nn_y
         )
         
         # Next-nearest neighbor hopping along y
-        t_nnn_y = (-1/6) * (2 * self.B * self.sigma_z + 1j * self.t_y * self.sigma_y)/2
+        t_nnn_y = (-1/6) * (2 * self.sigma_z + 1j * self.sigma_y)/2
         H_nnn_y = torch.kron(
-            torch.diag(torch.ones(self.Ny - 2, dtype=torch.complex64, device=self.funcDevice), 2),
+            torch.diag(torch.ones(self.Ny - 2, dtype=torch.complex64, device=self.funcDevice), -2),
             t_nnn_y
         )
         
@@ -264,16 +264,16 @@ class TopologicalSurface2D:
     def _construct_topological_hamiltonian(self) -> torch.Tensor:
         """Constructs the full 2D topological surface state Hamiltonian."""
         # Construct hopping along x-direction (nearest neighbor)
-        t_nn_x = (4/3)*(self.B * self.sigma_z + 1j * self.t_x * self.sigma_x)/2
+        t_nn_x = (4/3)*(self.sigma_z + 1j * self.sigma_x)/2
         H_nn_x = torch.kron(
-            torch.diag(torch.ones(self.Nx - 1, dtype=torch.complex64, device=self.funcDevice), 1),
+            torch.diag(torch.ones(self.Nx - 1, dtype=torch.complex64, device=self.funcDevice), -1),
             torch.kron(torch.eye(self.Ny, dtype=torch.complex64, device=self.funcDevice), t_nn_x)
         )
         
         # Next-nearest neighbor hopping along x
-        t_nnn_x = (-1/6) * (2 * self.B * self.sigma_z + 1j * self.t_x * self.sigma_x)/2
+        t_nnn_x = (-1/6) * (2 * self.sigma_z + 1j * self.sigma_x)/2
         H_nnn_x = torch.kron(
-            torch.diag(torch.ones(self.Nx - 2, dtype=torch.complex64, device=self.funcDevice), 2),
+            torch.diag(torch.ones(self.Nx - 2, dtype=torch.complex64, device=self.funcDevice), -2),
             torch.kron(torch.eye(self.Ny, dtype=torch.complex64, device=self.funcDevice), t_nnn_x)
         )
         
@@ -343,9 +343,9 @@ class MZMVortexHamiltonian(TopologicalSurface2D):
                             for spin2 in [0, 1]:
                                 idx1 = site1 * 2 + spin1
                                 idx2 = site2 * 2 + spin2
-                                if h_modified[idx1, idx2] != 0:
-                                    h_modified[idx1, idx2] *= phase
-                                    h_modified[idx2, idx1] = h_modified[idx1, idx2].conj()
+                                if h_modified[idx2, idx1] != 0:
+                                    h_modified[idx2, idx1] *= phase
+                                    h_modified[idx1, idx2] = h_modified[idx2, idx1].conj()
         
         return h_modified
     
@@ -415,10 +415,10 @@ class MZMVortexHamiltonian(TopologicalSurface2D):
                 x, y = torch.tensor(ix, dtype=torch.float32, device=self.funcDevice), torch.tensor(iy, dtype=torch.float32, device=self.funcDevice)  # Use actual lattice positions
                 delta = self._calculate_delta(x, y)
                 # Pairing in the basis |c_↑†,c_↑,c_↓†,c_↓⟩
-                h_bdg[pos, pos+3] = delta  # c_↑† to c_↓
-                h_bdg[pos+1, pos+2] = -delta.conj()  # c_↑ to c_↓†
-                h_bdg[pos+2, pos+1] = -delta  # c_↓† to c_↑
-                h_bdg[pos+3, pos] = delta.conj()  # c_↓ to c_↑†
+                h_bdg[pos, pos+3] = delta  # c_↑† to c_↓†
+                h_bdg[pos+1, pos+2] = -delta.conj()  # c_↑ to c_↓
+                h_bdg[pos+2, pos+1] = -delta  # c_↓† to c_↑†
+                h_bdg[pos+3, pos] = delta.conj()  # c_↓ to c_↑
         
         return h_bdg
 
